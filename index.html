@@ -157,8 +157,8 @@ function drawBloom(breath){
   bgv.addColorStop(0,'rgba(12,16,24,0.30)'); bgv.addColorStop(1,'rgba(4,5,9,0.34)');
   ctx.fillStyle=bgv; ctx.fillRect(0,0,w,h);
   const cx=w/2,cy=h/2, R=Math.min(w,h);
-  let a=Math.min(1,alphaSmooth*1.7*aGain), effA=Math.min(1,alphaSmooth);   // a = petal openness (aGain-boosted); effA = TRUE alpha for the rainbow gate
-  if(aManual>0.001){ a=aManual; effA=aManual; }        // manual preview overrides both (Control page)
+  let a=Math.min(1,alphaSmooth*1.7*aGain);              // petal openness (aGain-boosted)
+  if(aManual>0.001){ a=aManual; }                       // manual preview overrides it (Control page)
   const b=Math.min(1,F.Beta*1.7);
   const bal=a/(a+b+0.001);                             // 1 = calm(alpha) · 0 = thinking(beta)
   bloomRot   += 0.0016 + b*0.011;                      // calm drifts slowly; thinking turns a little quicker
@@ -198,28 +198,8 @@ function drawBloom(breath){
   ctx.beginPath(); ctx.arc(cx,cy,outR,0,Math.PI*2); ctx.stroke();
   for(let k=1;k<=2;k++){ ctx.strokeStyle=`hsla(${lineHue},76%,82%,${0.06+a*0.12})`; ctx.lineWidth=Math.max(1,R*0.0013);
     ctx.beginPath(); ctx.arc(cx,cy,outR*(0.42+0.26*k),0,Math.PI*2); ctx.stroke(); }
-  // --- interlocking rainbow CRESCENTS: earned only when TRUE alpha crosses the (adjustable) threshold ---
-  const ro=Math.max(0,Math.min(1,(effA-rThresh)/Math.max(0.05,(1-rThresh)*0.6)));
-  if(ro>0.01){ const er=outR*0.42, d=er*0.5, seg=54, rsat=Math.max(82,sat), gap=0.62;  // gap → open end
-    const arcs=[ {ex:cx-d, gapAt:Math.PI},   // left crescent, opening faces left (outward)
-                 {ex:cx+d, gapAt:0} ];        // right crescent, opening faces right (outward)
-    ctx.globalCompositeOperation='source-over'; ctx.lineCap='round'; ctx.shadowBlur=0;
-    for(const c of arcs){ ctx.strokeStyle=`rgba(6,8,14,${0.5*ro})`; ctx.lineWidth=Math.max(11,R*0.034); // dark backing
-      ctx.beginPath(); ctx.arc(c.ex,cy,er, c.gapAt+gap, c.gapAt-gap+Math.PI*2); ctx.stroke(); }
-    for(const c of arcs){ ctx.save();                                             // rainbow open C — diffuse + core
-      const start=c.gapAt+gap, sweep=Math.PI*2-2*gap;
-      ctx.shadowBlur=R*0.032; ctx.lineWidth=Math.max(11,R*0.032);                 // diffuse halo: wide, blurred, colours bleed
-      for(let i=0;i<seg;i++){ const a0=start+i/seg*sweep, a1=start+(i+1)/seg*sweep;
-        const hh=Math.round((i/seg*360 + bloomRot*28)%360);
-        ctx.strokeStyle=`hsla(${hh},90%,66%,${0.34*ro})`; ctx.shadowColor=`hsla(${hh},95%,66%,0.65)`;
-        ctx.beginPath(); ctx.arc(c.ex,cy,er,a0,a1+0.10); ctx.stroke(); }
-      ctx.shadowBlur=R*0.012; ctx.lineWidth=Math.max(3,R*0.011);                  // soft core so it still reads
-      for(let i=0;i<seg;i++){ const a0=start+i/seg*sweep, a1=start+(i+1)/seg*sweep;
-        const hh=Math.round((i/seg*360 + bloomRot*28)%360);
-        ctx.strokeStyle=`hsla(${hh},${rsat}%,72%,${0.6*ro})`; ctx.shadowColor='transparent';
-        ctx.beginPath(); ctx.arc(c.ex,cy,er,a0,a1+0.07); ctx.stroke(); }
-      ctx.restore(); }
-    ctx.globalCompositeOperation='lighter'; }
+  // (the interlocking rainbow crescents were removed 2026-09-01 — they read as a
+  //  double-C glyph sitting in the middle of the bloom rather than as part of the flower)
   // gentle luminous core — warm gold when calm, cool lavender when thinking (soft, not blown out)
   const coreR=petalR*0.8, coreHue=(50+(1-bal)*190)%360;
   ctx.globalCompositeOperation='lighter';
