@@ -1,19 +1,15 @@
-# MuseRave
+# Neyeronstein
 
-A website that reads your Muse 2 brainwaves live and turns them into visuals — and, in later phases, AI images. It connects the headband straight from the browser over Bluetooth. No install, no Terminal.
+Generative visuals for a live brain-art piece.
 
-## Live site
-Once GitHub Pages is on: **https://ufangYang.github.io/MuseRave/**
-Open it in Chrome or Edge, click **Connect Muse**, and your five brainwave bands drive the visuals in real time. (Safari/Firefox can't do Web Bluetooth.)
+© 2026 Yu-Fang Yang. All rights reserved. See `LICENSE`.
 
-## How it works
-- `index.html` — the whole app in one file. Uses [muse-js](https://github.com/urish/muse-js) (Web Bluetooth) to pair the Muse 2, computes the five EEG bands (delta, theta, alpha, beta, gamma) with a built-in FFT, and renders live art. Try **Simulate** to see it with no headset.
-- Everything runs in your browser. Nothing is sent to a server.
+The artwork is licensed CC BY-NC 4.0. The source code and the name
+"Neyeronstein" are **not** licensed for reuse: no copying, redistribution,
+modification or derivative work without written permission.
 
-## Roadmap
-- Phase 1: connect + live bands (done, in `index.html`).
-- Phase 2: preprocess bands into steady 0–1 features.
-- Phase 3: map features to a text prompt.
-- Phase 4: call a cheap image model from the prompt and show the picture.
+This repository holds the visualiser only. The signal processing and the
+hardware connection are not part of it and are not published.
 
-Progress is tracked step-by-step in `00-Build-Log.md`.
+Not a medical device. This is an artwork. It does not diagnose, treat, monitor
+or assess any condition, and nothing it displays is a health measurement.
