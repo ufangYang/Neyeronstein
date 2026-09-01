@@ -1,5 +1,13 @@
 <!DOCTYPE html>
-<!-- MuseGaze visualiser · butterfly swarm + drift · redeploy 2026-08-06 -->
+<!-- ==========================================================================
+     Neyeronstein / MuseGaze — Visualiser
+     © 2026 Yu-Fang Yang. All rights reserved.
+
+     Artwork is licensed CC BY-NC 4.0. The SOURCE CODE and the name
+     "Neyeronstein" are NOT licensed for reuse: no copying, redistribution,
+     modification or derivative work without written permission.
+     Contact: yufang-yang.com
+     ========================================================================== -->
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -29,16 +37,18 @@
   #heart .hh { color:#22c55e; font-size:16px; transition:transform .12s; display:inline-block; }
   a.link, button.link { font-size:13px; color:#e8ecf3; text-decoration:none; border:1px solid #3b82f6; background:#3b82f6; padding:8px 12px; border-radius:10px; cursor:pointer; }
   canvas { display: block; position: fixed; inset: 0; z-index: 2; }
-  .scenelayer { position: fixed; inset: 0; z-index: 1; background-size: cover; background-position: center;
-    opacity: 0; transition: opacity 1.8s ease; will-change: opacity, transform; }
   #wait { position: fixed; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; text-align: center; color: #6b7488; pointer-events: none; }
   #wait.hide { display: none; }
   #wait b { color: #aeb8c9; font-size: 20px; font-weight: 600; }
   #wait span { font-size: 14px; }
-  #caption { position: fixed; left:0; right:0; bottom: 34px; z-index: 8; text-align:center; pointer-events:none;
+  #caption { position: fixed; left:0; right:0; bottom: 40px; z-index: 8; text-align:center; pointer-events:none; padding: 0 240px;
     font-size: 15px; letter-spacing:.5px; color:#aeb8c9; text-shadow:0 2px 18px #000; opacity:.85; transition:opacity .4s; }
   body.present #caption { opacity: 0; }
   body.present #caption.force { opacity: .92; }
+  #mark { position: fixed; right: 14px; bottom: 10px; z-index: 8; font-size: 11px; letter-spacing: .3px;
+    color: #7c8598; opacity: .75; pointer-events: none; text-shadow: 0 1px 10px #000; }
+  body.present #mark { opacity: .45; }
+
 </style>
 </head>
 <body>
@@ -49,7 +59,8 @@
       <button data-mode="spectrum">Spectrum</button>
       <button data-mode="butterfly">Butterfly</button>
       <button data-mode="drift">Drift</button>
-      <button data-mode="scenes">Scenes</button>
+      <button data-mode="sky">Sky</button>
+      <button data-mode="veil">Veil</button>
     </div>
     <span id="status">Waiting for Control…</span>
     <div class="spacer"></div>
@@ -58,23 +69,21 @@
     </div>
     <div id="heart" title="Guided breath pace"><span class="hh">◯</span><span id="bpm">--</span></div>
     <button id="presentBtn" class="link">Present ⛶</button>
-    <a class="link" href="./control.html" target="_blank" rel="noopener">Open Control ▸</a>
   </div>
-  <div id="scA" class="scenelayer"></div>
-  <div id="scB" class="scenelayer"></div>
   <canvas id="art"></canvas>
   <div id="caption"></div>
   <div id="wait">
-    <b>Waiting for the Control window</b>
-    <span>Open Control ▸, click Connect Muse (or Simulate) there — this screen renders it live.</span>
+    <b>Neyeronstein</b>
+    <span>starting…</span>
   </div>
+  <div id="mark">© 2026 Yu-Fang Yang · Neyeronstein</div>
 
 <script type="module">
 // ============================================================================
 //  MuseGaze — VISUALISER. Pure receiver. Aesthetic target: Apple-Breathe calm —
 //  soft overlapping translucent forms that breathe, clean color, no busy lines.
 //  Bloom = brain-driven breathing rosette. Aurora = full-screen color field.
-//  Spectrum = filled rainbow corona of the live 3–45 Hz spectrum. Scenes = state.
+//  Spectrum = filled rainbow corona of the live 3–45 Hz spectrum. Sky = alpha opens a dusk.
 //  Guided BREATH (not the heartbeat) makes everything breathe; alpha drives a
 //  screen-wide bloom + an "eyes open/closed" badge — the canonical alpha tell.
 // ============================================================================
@@ -546,17 +555,376 @@ function drawButterfly(breath, variant){
   alphaBloom(breath, 0.5);                                       // gentle so the wing colours stay vivid
 }
 
-// ---- Scenes: pre-made cinematic images; the classified brain state cross-fades between them.
-const SCENES={ odyssey:'./odyssey.png', mobydick:'./mobydick.png', wonderland:'./wonderland.png', alice:'./alice.png' };
-for(const k in SCENES){ const im=new Image(); im.src=SCENES[k]; }
-const scA=document.getElementById('scA'), scB=document.getElementById('scB');
-let scFront=scB, scBack=scA, curScene='', lastSceneT=-1e9;
-function showSceneLayers(on){ scA.style.display=on?'block':'none'; scB.style.display=on?'block':'none'; }
-showSceneLayers(false);
-const STATE_SCENE={ Relaxed:'wonderland', Drowsy:'alice', Focused:'odyssey', Excited:'mobydick', Neutral:'wonderland' };
-function sceneFor(){ return STATE_SCENE[curState] || 'wonderland'; }
-function crossfadeTo(name){ scBack.style.backgroundImage=`url("${SCENES[name]}")`;
-  scBack.style.opacity=1; scFront.style.opacity=0; [scFront,scBack]=[scBack,scFront]; curScene=name; }
+// ============================================================================
+//  SKY (replaces Scenes, 2026-08-23) — a bare tree in silhouette against a
+//  Monet dusk. The palette is FIXED violet→rose; alpha never shifts the hue,
+//  it WIDENS the colour: the rose field climbs the sky, the halo behind the
+//  canopy opens, the diffusion softens and the motes rise. Eyes closed and the
+//  whole sky opens outward. Beta only quickens the drift of the cloud fields.
+// ============================================================================
+let skyT=0, skyClouds=[], skyStars=[], skyMotes=[];
+function seedRnd(s){ let x=(s>>>0)||1; return ()=>{ x^=x<<13; x>>>=0; x^=x>>>17; x^=x<<5; x>>>=0; return x/4294967296; }; }
+function initSky(){
+  const R=seedRnd(20260823);
+  // Clouds are real patches, not washes: each is a run of overlapping lobes, wider
+  // than tall, lit from below by the horizon so the underside catches the rose.
+  skyClouds=[];
+  for(let i=0;i<8;i++){
+    const n=5+Math.floor(R()*4), lobes=[];
+    for(let j=0;j<n;j++) lobes.push({ dx:(j/(n-1)-0.5)*2+(R()-0.5)*0.22, dy:(R()-0.5)*0.66, r:0.46+R()*0.54 });
+    skyClouds.push({ x:R(), y:0.14+R()*0.66, w:0.18+R()*0.26, hue:203+R()*32,
+      ph:R()*6.283, sp:0.09+R()*0.20, dir:R()<0.5?-1:1, lobes });
+  }
+  skyStars=[];  for(let i=0;i<80;i++) skyStars.push({ x:R(), y:R()*0.62, r:0.4+R()*1.4, ph:R()*6.283, sp:0.5+R()*1.5 });
+  skyMotes=[];  for(let i=0;i<30;i++) skyMotes.push({ x:R(), y:R(), s:0.4+R()*0.7, ph:R()*6.283, sp:0.10+R()*0.16, dr:(R()-0.5)*0.5 });
+}
+// One tree, regrown identically every frame from a fixed seed; only the sway differs.
+function skyBranch(x,y,len,ang,wd,d,sway,R){
+  if(d>9||len<3.2) return;
+  const a=ang+sway*(0.02+d*0.028)*Math.sin(skyT*0.75+d*0.85);
+  const x2=x+Math.cos(a)*len, y2=y+Math.sin(a)*len;
+  const bow=len*0.07*(d%2?1:-1);
+  ctx.lineWidth=Math.max(0.55,wd); ctx.beginPath(); ctx.moveTo(x,y);
+  ctx.quadraticCurveTo(x+Math.cos(a)*len*0.5-Math.sin(a)*bow, y+Math.sin(a)*len*0.5+Math.cos(a)*bow, x2, y2);
+  ctx.stroke();
+  const n=(d<2)?2:(R()<0.30?3:2);
+  for(let i=0;i<n;i++){
+    const spread=(0.30+R()*0.40)*((i%2)?1:-1)+(R()-0.5)*0.20;
+    skyBranch(x2,y2,len*(0.66+R()*0.15), a+spread, wd*0.64, d+1, sway, R);
+  }
+}
+// ============================================================================
+//  VEIL (2026-08-23) — light through rippled glass falling down a wall, with the
+//  water caustics it throws across the floor.
+//
+//  The thing that makes a caustic look like a caustic, rather than like a wavy
+//  line, is that brightness is the INVERSE of how fast the light is being swept
+//  sideways. Where the ribbon runs vertically the rays pile up and it flares;
+//  where it slants they smear out and it dims and widens. So each segment is
+//  drawn with brightness ∝ 1/(1+slant) and width ∝ slant, slant being |dx/dy|.
+//  That single relation buys the bright cusps at the folds for free.
+//
+//  ALPHA CONTROLS SPEED, not width. Calm slows the whole field almost to a stop;
+//  an alert brain keeps it moving. Width is now constant, so the composition does
+//  not breathe in and out. A small brightness lift stays on alpha, because pure
+//  speed is hard to read from the back of a room and the piece still needs one
+//  change an audience can name.
+//  Beta tightens the ripple · Theta drifts the field downward · breath sways it.
+// ============================================================================
+let veilT=0, veilRibs=[], veilBloom=null, veilBctx=null, veilLayer=null, veilLctx=null,
+    veilCau=null, veilCctx=null, veilCimg=null, veilFrame=0;
+const CAU_W=160, CAU_H=64;
+function initVeil(){
+  const R=seedRnd(31415);
+  veilRibs=[];
+  // Five ribbons, not seven, and LOW spatial frequency: about two and a half lazy
+  // undulations down the whole frame. The first version ran 11–16 cycles and read
+  // as scribble — glass ripples are long and slow, and the eye wants to follow one
+  // curve from ceiling to floor rather than count wiggles.
+  // Smoke, not tubes. What separates a plume from a ribbon is that it is SEVERAL
+  // thin filaments that splay apart, converge, and dissolve in places. So every
+  // ribbon carries three strands whose lateral offset itself varies with height,
+  // plus a dissolve envelope that lets stretches of it fade to nothing.
+  for(let i=0;i<5;i++){
+    const strands=[];
+    for(let j=0;j<3;j++) strands.push({
+      o:(j-1)*(0.014+R()*0.016),          // lateral offset at rest
+      ko:0.7+R()*1.1, po:R()*6.283, so:0.04+R()*0.05,   // how that offset breathes with height
+      w:0.0020+R()*0.0026, b:0.55+R()*0.55 });
+    veilRibs.push({
+      x:0.16+i*0.170+(R()-0.5)*0.045, a:0.022+R()*0.018,   // lateral wander ~10% of width
+      k1:1.3+R()*0.9, k2:2.7+R()*1.3, k3:5.0+R()*2.0,
+      p1:R()*6.283, p2:R()*6.283, p3:R()*6.283,
+      s1:0.09+R()*0.06, s2:0.13+R()*0.07, s3:0.17+R()*0.09,
+      kd:0.7+R()*1.0, pd:R()*6.283, sd:0.06+R()*0.06,      // the dissolve, under one cycle per frame
+      w:0.0030+R()*0.0034, br:0.72+R()*0.5, strands });
+  }
+  if(!veilCau){ veilCau=document.createElement('canvas'); veilCau.width=CAU_W; veilCau.height=CAU_H;
+    veilCctx=veilCau.getContext('2d'); veilCimg=veilCctx.createImageData(CAU_W,CAU_H); }
+}
+// The ribbons are drawn into a HALF-RESOLUTION layer, never onto the main canvas
+// directly, and never read back off it. Reading the main canvas to build a glow
+// forces a GPU→CPU round trip and can stall a frame on real hardware. Instead the
+// layer is composited twice — once tiny and stretched (the glow), once at size —
+// and the upscaling filter supplies the softness for free.
+function veilLayerCanvas(w,h){
+  const lw=Math.max(64,Math.round(w/2)), lh=Math.max(64,Math.round(h/2));
+  if(!veilLayer){ veilLayer=document.createElement('canvas'); veilLctx=veilLayer.getContext('2d'); }
+  if(veilLayer.width!==lw||veilLayer.height!==lh){ veilLayer.width=lw; veilLayer.height=lh; }
+  return veilLayer;
+}
+function veilBloomCanvas(w,h){
+  const bw=Math.max(24,Math.round(w/10)), bh=Math.max(16,Math.round(h/10));
+  if(!veilBloom){ veilBloom=document.createElement('canvas'); veilBctx=veilBloom.getContext('2d'); }
+  if(veilBloom.width!==bw||veilBloom.height!==bh){ veilBloom.width=bw; veilBloom.height=bh; }
+  return veilBloom;
+}
+// Floor caustics: two crossed travelling wave fields, sharpened with a high power
+// so the bright parts collapse into thin filaments instead of soft blobs.
+// Perspective lives in the SAMPLING COORDINATES, not in how the rows are drawn.
+// Scaling each output row by a different factor makes the pattern fan out into
+// visible triangles. Instead every pixel is projected onto a ground plane first —
+// z = 1/(k + t) — and the wave field is evaluated in those world coordinates, so
+// the floor can be blitted as one plain rectangle with no seams and no fan.
+function veilCaustic(a,be){
+  const d=veilCimg.data, t=veilT;
+  for(let v=0;v<CAU_H;v++){
+    const tv=v/(CAU_H-1);
+    const z=1.0/(0.13+tv*0.92);                     // 7.7 far → 1.0 near
+    const fade=Math.min(1, 0.22+tv*1.05);           // distant floor reads dimmer
+    const wy=z*3.4;
+    for(let u=0;u<CAU_W;u++){
+      const wx=(u/CAU_W-0.5)*z*7.0;
+      const n = Math.sin(wx*0.90+t*0.62) + Math.sin(wy*1.05-t*0.44) + Math.sin((wx+wy)*0.55+t*0.31);
+      const m = Math.sin(wx*0.62-t*0.37) + Math.sin(wy*0.78+t*0.51);
+      let c = Math.max(0, Math.sin(wx*0.50 + n*1.45)); c*=c; c*=c; c*=c;          // ^8
+      let e = Math.max(0, Math.sin(wy*0.66 + m*1.20)); e*=e; e*=e;                // ^4
+      const val = Math.min(1, (c + e*0.42) * (0.30+a*0.85) * fade);
+      const i=(v*CAU_W+u)*4;
+      d[i]=234*val; d[i+1]=243*val; d[i+2]=255*val; d[i+3]=255*val;
+    }
+  }
+  veilCctx.putImageData(veilCimg,0,0);
+}
+function drawVeil(breath){
+  const w=canvas.width,h=canvas.height;
+  if(!veilRibs.length) initVeil();
+  const a=Math.min(1, alphaSmooth*1.7), be=F.Beta||0, th=F.Theta||0;
+  // ALPHA → SPEED. Calm nearly stops the field; alert keeps it moving. The range is
+  // 4:1, which is large enough that a room notices the change without being told.
+  veilT += (0.030 - a*0.026) + be*0.010;
+  const drift = veilT*(0.05+th*0.14);                      // theta slides the whole veil down
+  // Breath sway is deliberately SMALL. It runs on its own oscillator, independent of
+  // alpha, so at full amplitude it swamped the slowdown and measured motion barely
+  // changed. The second term rides veilT, so it slows with everything else.
+  const sway  = (breath-0.5)*0.006 + Math.sin(veilT*0.11)*0.012;
+  const floorY = Math.round(h*0.70);
+
+  // 1 — the room. Warm neutral wall, cooler in the corners, a darker floor below.
+  // The tonal relationship that makes this read as DAYLIGHT rather than as a lamp:
+  // the wall is warm greige, the light falling on it is cooler than the wall. Reverse
+  // that and the whole thing turns into stage lighting. So the plaster carries the
+  // warmth and every luminous element below is a cool white.
+  const wg=ctx.createLinearGradient(0,0,0,floorY);
+  wg.addColorStop(0,'#2b2724'); wg.addColorStop(0.30,'#544c45');
+  wg.addColorStop(0.68,'#6d635a'); wg.addColorStop(1,'#5e554e');
+  ctx.fillStyle=wg; ctx.fillRect(0,0,w,floorY);
+  const fg=ctx.createLinearGradient(0,floorY,0,h);
+  fg.addColorStop(0,'#4a443e'); fg.addColorStop(0.45,'#3a3531'); fg.addColorStop(1,'#282523');
+  ctx.fillStyle=fg; ctx.fillRect(0,floorY,w,h-floorY);
+  // a cool daylight wash from the upper left, so the room has a source
+  const dl=ctx.createRadialGradient(w*0.16,-h*0.10,0,w*0.16,-h*0.10,Math.max(w,h)*0.95);
+  dl.addColorStop(0,`rgba(188,208,236,${0.10+a*0.07})`);
+  dl.addColorStop(0.5,`rgba(168,190,222,${0.04+a*0.03})`);
+  dl.addColorStop(1,'rgba(150,175,210,0)');
+  ctx.fillStyle=dl; ctx.fillRect(0,0,w,floorY);
+
+  // 2 — the ribbons, into the half-res layer. Wide faint halo pass, then the core.
+  // Each ribbon is a FILLED BAND, not a stroked line. Stroking it segment by
+  // segment beaded badly: under 'screen' the round caps overlap and every joint
+  // brightened into a dot. A polygon whose half-width follows the Jacobian, filled
+  // with a vertical gradient carrying the brightness down its length, gives the
+  // same physics with a continuous edge. Three nested passes make it soft.
+  const lc=veilLayerCanvas(w,floorY), L=veilLctx, sx=lc.width/w, sy=lc.height/floorY;
+  L.clearRect(0,0,lc.width,lc.height);
+  L.globalCompositeOperation='screen';
+  const STEPS=120;
+  const HALO={k:3.4,o:0.085}, BODY={k:1.45,o:0.20}, CORE={k:0.44,o:1.0};
+  const xs=new Float64Array(STEPS+1), ys=new Float64Array(STEPS+1),
+        hw=new Float64Array(STEPS+1), br=new Float64Array(STEPS+1);
+  const SMOKE='218,236,248';                              // pale cyan, the colour smoke reads as
+  function veilFill(p,tint){                              // one polygon + its brightness gradient
+    const g=L.createLinearGradient(0,0,0,lc.height);
+    for(let s=0;s<=STEPS;s+=6){
+      const v=Math.min(0.92, br[s]*p.o);
+      g.addColorStop(s/STEPS, `rgba(${tint},${v.toFixed(3)})`);
+    }
+    L.fillStyle=g; L.beginPath();
+    L.moveTo(xs[0]+hw[0]*p.k, ys[0]);
+    for(let s=1;s<=STEPS;s++) L.lineTo(xs[s]+hw[s]*p.k, ys[s]);
+    for(let s=STEPS;s>=0;s--) L.lineTo(xs[s]-hw[s]*p.k, ys[s]);
+    L.closePath(); L.fill();
+  }
+  for(const r of veilRibs){
+    const amp=r.a;                                        // width no longer tracks alpha
+    for(let si=0; si<r.strands.length; si++){
+      const st=r.strands[si];
+      for(let s=0;s<=STEPS;s++){
+        const yn=s/STEPS, yy=yn+drift;
+        ys[s]=yn*lc.height;
+        // the strand's own offset breathes with height, so the three splay and re-gather
+        const off=st.o*(0.35+1.3*Math.sin(st.ko*yy+st.po+veilT*st.so));
+        xs[s]=(r.x + sway + off + amp*( Math.sin(r.k1*yy+r.p1+veilT*r.s1)
+                                      + 0.45*Math.sin(r.k2*yy+r.p2-veilT*r.s2)
+                                      + 0.17*Math.sin(r.k3*yy+r.p3+veilT*r.s3) ))*lc.width;
+      }
+      for(let s=0;s<=STEPS;s++){
+        const yn=s/STEPS;
+        const i0=Math.max(0,s-1), i1=Math.min(STEPS,s+1);
+        // |dx/dy| — clamped, because at a near-horizontal fold it runs away
+        const slant=Math.min(2.4, Math.abs(xs[i1]-xs[i0])/(Math.abs(ys[i1]-ys[i0])+1e-6));
+        hw[s]=lc.width*st.w*(1.0+slant*2.6);              // smears where it sweeps
+        // dissolve: stretches of the filament fade out entirely, the way smoke thins
+        const dis=0.58+0.42*Math.sin(r.kd*(yn+drift)+r.pd+veilT*r.sd);   // thins, never breaks
+        // and it never meets the frame edge hard
+        const env=Math.min(1, yn/0.14)*(1-0.55*Math.max(0,(yn-0.78)/0.22));
+        br[s]=r.br*st.b*(0.50+a*0.42)*dis*env/(1+slant*2.2);
+      }
+      if(si===1) veilFill(HALO,SMOKE);                    // one halo per ribbon, on the middle strand
+      veilFill(BODY,SMOKE);
+      veilFill(CORE,'236,248,255');
+    }
+  }
+  L.globalCompositeOperation='source-over';
+
+  // 3 — composite: the glow (layer squeezed to a tenth and stretched back), then
+  //     the layer itself. Both on 'screen', so light adds rather than covers.
+  ctx.globalCompositeOperation='screen';
+  const bc=veilBloomCanvas(w,floorY);
+  veilBctx.clearRect(0,0,bc.width,bc.height);
+  veilBctx.drawImage(lc,0,0,lc.width,lc.height,0,0,bc.width,bc.height);
+  ctx.globalAlpha=0.30+a*0.24;
+  ctx.drawImage(bc,0,0,bc.width,bc.height,0,0,w,floorY);
+  ctx.globalAlpha=1;
+  ctx.drawImage(lc,0,0,lc.width,lc.height,0,0,w,floorY);
+
+  // 4 — the floor. Caustic field in perspective: far rows narrow and dim, near
+  //     rows wide and bright, so the light lies down on the ground.
+  if((veilFrame++&1)===0) veilCaustic(a,be);
+  ctx.globalAlpha=0.34+a*0.44;
+  ctx.drawImage(veilCau,0,0,CAU_W,CAU_H,0,floorY,w,h-floorY);
+  ctx.globalAlpha=1;
+
+  // 5 — each ribbon lays a soft pool of its own light on the floor beneath it
+  for(const r of veilRibs){
+    const amp=r.a*(0.50+a*1.15);
+    const yy=1+drift;
+    const x=(r.x + sway + amp*( Math.sin(r.k1*yy+r.p1+veilT*r.s1)
+                              + 0.45*Math.sin(r.k2*yy+r.p2-veilT*r.s2)
+                              + 0.17*Math.sin(r.k3*yy+r.p3+veilT*r.s3) ))*w;
+    // A soft radial pool, NOT a trapezoid — hard-edged wedges fanned across the
+    // floor and read as geometry rather than as light.
+    const pr=w*0.16*(0.7+a*0.6), py=floorY+(h-floorY)*0.34;
+    const rg=ctx.createRadialGradient(x,py,0,x,py,pr);
+    rg.addColorStop(0,`rgba(226,238,255,${0.05+a*0.14})`);
+    rg.addColorStop(0.45,`rgba(212,226,246,${0.02+a*0.055})`);
+    rg.addColorStop(1,'rgba(200,216,240,0)');
+    ctx.fillStyle=rg; ctx.beginPath(); ctx.ellipse(x,py,pr,pr*0.42,0,0,Math.PI*2); ctx.fill();
+  }
+  ctx.globalCompositeOperation='source-over';
+
+  // 6 — the seam where wall meets floor, and a vignette so the room has corners
+  const sm=ctx.createLinearGradient(0,floorY-h*0.05,0,floorY+h*0.03);
+  sm.addColorStop(0,'rgba(10,9,9,0)'); sm.addColorStop(0.72,'rgba(10,9,9,0.42)'); sm.addColorStop(1,'rgba(10,9,9,0)');
+  ctx.fillStyle=sm; ctx.fillRect(0,floorY-h*0.05,w,h*0.08);
+  const vg=ctx.createRadialGradient(w/2,h*0.46,Math.min(w,h)*0.30,w/2,h*0.46,Math.max(w,h)*0.80);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,`rgba(6,5,5,${0.56-a*0.14})`);
+  ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
+}
+
+function drawSky(breath){
+  const w=canvas.width,h=canvas.height;
+  if(!skyClouds.length) initSky();
+  skyT += 0.0055 + (F.Beta||0)*0.009;                       // beta only quickens the drift
+  const a=Math.min(1, alphaSmooth*1.7);                     // display gain so modest alpha already reads
+  const spread=0.16+a*0.52;                                 // how far up the rose field climbs
+  const horizon=h*0.84, cx=w*0.52;
+
+  // 1 — the sky itself. A blue hour, not a night: deep cobalt above, cerulean, then
+  //     periwinkle, with the rose only at the hem. Hue is anchored at every alpha;
+  //     alpha changes the reach of the rose and lifts the whole frame a little.
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,    `hsl(224,${52+a*8}%,${11+a*7}%)`);
+  g.addColorStop(0.34, `hsl(212,${56+a*10}%,${18+a*11}%)`);
+  g.addColorStop(Math.max(0.40,Math.min(0.84,1-spread*0.78)), `hsl(232,${52+a*12}%,${25+a*14}%)`);
+  g.addColorStop(0.88, `hsl(318,${48+a*18}%,${31+a*20}%)`);
+  g.addColorStop(1,    `hsl(338,${50+a*16}%,${27+a*17}%)`);
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+
+  // 2 — stars, only in the upper sky; they surface as the sky opens.
+  ctx.globalCompositeOperation='screen';
+  for(const s of skyStars){
+    const tw=0.5+0.5*Math.sin(skyT*s.sp*3+s.ph);
+    const op=(0.05+a*0.30)*tw; if(op<0.02) continue;
+    ctx.fillStyle=`hsla(205,55%,94%,${op})`;
+    ctx.beginPath(); ctx.arc(s.x*w, s.y*h*0.9, s.r*(0.7+a*0.6), 0, Math.PI*2); ctx.fill();
+  }
+
+  // 3 — cloud patches. Each is a run of soft lobes with a body and a lit underside,
+  //     so they read as cloud rather than haze. Monet still: no edge is ever hard.
+  for(const c of skyClouds){
+    const px=(((c.x + c.dir*skyT*c.sp*0.05)%1.4+1.4)%1.4-0.2)*w;
+    const py=(c.y + Math.sin(skyT*c.sp*0.8+c.ph)*0.022)*h;
+    const cw=w*c.w*(0.86+spread*0.44)*(0.97+breath*0.05), chh=cw*0.33;
+    const near=Math.max(0, 1-Math.abs(py-horizon)/(h*0.72));   // low clouds catch more of the glow
+    const body=(0.12+a*0.26)*(0.78+0.22*Math.sin(skyT*0.45+c.ph));
+    const lit =(0.05+a*0.26)*near;
+    for(const l of c.lobes){
+      const lx=px+l.dx*cw*0.5, ly=py+l.dy*chh*0.5, r=l.r*chh;
+      const rg=ctx.createRadialGradient(lx,ly-r*0.18,0,lx,ly,r);
+      rg.addColorStop(0,   `hsla(${c.hue},70%,${74+a*8}%,${body})`);
+      rg.addColorStop(0.48,`hsla(${c.hue+10},66%,${64+a*8}%,${body*0.46})`);
+      rg.addColorStop(1,   `hsla(${c.hue+18},62%,58%,0)`);
+      ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(lx,ly,r,0,Math.PI*2); ctx.fill();
+      if(lit>0.012){                                            // rose caught on the underside
+        const ur=r*0.72, uy=ly+r*0.34;
+        const ug=ctx.createRadialGradient(lx,uy,0,lx,uy,ur);
+        ug.addColorStop(0,  `hsla(330,86%,78%,${lit})`);
+        ug.addColorStop(0.5,`hsla(316,78%,70%,${lit*0.40})`);
+        ug.addColorStop(1,  'hsla(300,70%,64%,0)');
+        ctx.fillStyle=ug; ctx.beginPath(); ctx.arc(lx,uy,ur,0,Math.PI*2); ctx.fill();
+      }
+    }
+  }
+
+  // 4 — the horizon glow behind the tree. This is the widening: it opens with alpha.
+  const hr=Math.max(w,h)*(0.26+a*0.52)*(0.95+breath*0.09);
+  const hg=ctx.createRadialGradient(cx,horizon,0,cx,horizon,hr);
+  hg.addColorStop(0,    `hsla(334,86%,76%,${0.10+a*0.30})`);
+  hg.addColorStop(0.28, `hsla(310,78%,68%,${0.05+a*0.15})`);
+  hg.addColorStop(0.58, `hsla(258,74%,64%,${0.02+a*0.07})`);
+  hg.addColorStop(1,    'hsla(212,76%,60%,0)');
+  ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(cx,horizon,hr,0,Math.PI*2); ctx.fill();
+  ctx.globalCompositeOperation='source-over';
+
+  // 5 — the tree, near-black so the sky reads through the branches.
+  const scale=Math.min(w,h);
+  ctx.save();
+  ctx.strokeStyle='rgba(10,14,30,0.93)'; ctx.lineCap='round'; ctx.lineJoin='round';   // blue-black, not dead black
+  ctx.shadowColor=`hsla(326,84%,70%,${0.22+a*0.44})`; ctx.shadowBlur=scale*(0.010+a*0.030);
+  const sway=0.55+breath*0.35;
+  skyBranch(cx, horizon+scale*0.045, scale*0.172, -Math.PI/2, scale*0.021, 0, sway, seedRnd(7717));
+  ctx.shadowBlur=0;
+  // ground: a low soft band so the trunk is planted, not floating
+  const gr=ctx.createLinearGradient(0,horizon-scale*0.02,0,h);
+  gr.addColorStop(0,'rgba(14,20,44,0)'); gr.addColorStop(0.35,'rgba(13,19,42,0.70)'); gr.addColorStop(1,'rgba(8,12,28,0.95)');
+  ctx.fillStyle=gr; ctx.fillRect(0,horizon-scale*0.02,w,h-horizon+scale*0.02);
+  ctx.restore();
+
+  // 6 — motes rising through the branches; more of them the wider the sky opens.
+  ctx.globalCompositeOperation='screen';
+  const nM=Math.round(a*skyMotes.length);
+  for(let i=0;i<nM;i++){ const m=skyMotes[i];
+    const my=((m.y - skyT*m.sp*0.05)%1+1)%1;
+    const mx=m.x + Math.sin(skyT*0.5+m.ph)*0.02*m.dr*10;
+    const rr=scale*0.0022*m.s*(1+a*0.5), R6=rr*3.2;
+    const op=0.06+a*0.20;
+    const rg=ctx.createRadialGradient(mx*w,my*h,0,mx*w,my*h,R6);
+    rg.addColorStop(0,`hsla(324,80%,88%,${op})`); rg.addColorStop(0.45,`hsla(312,74%,78%,${op*0.35})`); rg.addColorStop(1,'hsla(300,70%,70%,0)');
+    ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(mx*w,my*h,R6,0,Math.PI*2); ctx.fill();
+  }
+
+  // 7 — a final soft wash over everything: the diffusion Monet gets from wet paper.
+  const bl=ctx.createRadialGradient(cx,horizon*0.94,0,cx,horizon*0.94,Math.max(w,h)*(0.5+a*0.5));
+  bl.addColorStop(0,`hsla(318,70%,66%,${0.015+a*0.05})`); bl.addColorStop(1,'hsla(280,60%,50%,0)');
+  ctx.fillStyle=bl; ctx.fillRect(0,0,w,h);
+  ctx.globalCompositeOperation='source-over';
+
+  // 8 — vignette, so the projector edge falls away instead of ending
+  const vg=ctx.createRadialGradient(w/2,h*0.52,Math.min(w,h)*0.28,w/2,h*0.52,Math.max(w,h)*0.78);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,`rgba(6,10,26,${0.44-a*0.16})`);
+  ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
+}
 
 let mode='bloom'; const modeBox=document.getElementById('modes');
 modeBox.addEventListener('click', e => { const btn=e.target.closest('button'); if(!btn) return;
@@ -564,7 +932,7 @@ modeBox.addEventListener('click', e => { const btn=e.target.closest('button'); i
   ctx.clearRect(0,0,canvas.width,canvas.height);
   if(mode==='plasma') initPlasma();
   swarm=[]; spawnAcc=0;                                          // fresh flock per mode (gamma↔theta differ)
-  const sc=(mode==='scenes'); showSceneLayers(sc); if(sc) lastSceneT=-1e9; });
+  if(mode==='sky') initSky(); if(mode==='veil') initVeil(); });
 canvas.addEventListener('click', e=>{ if(mode!=='plasma') return;          // tap the pill to switch Waves ↔ Trends
   const r=canvas.getBoundingClientRect(); const x=(e.clientX-r.left)*canvas.width/r.width, y=(e.clientY-r.top)*canvas.height/r.height;
   if(x>=tgl.x&&x<=tgl.x+tgl.w&&y>=tgl.y&&y<=tgl.y+tgl.h) plasmaView=(plasmaView==='waves'?'trends':'waves'); });
@@ -578,11 +946,49 @@ const CAPTION={ bloom:'Calm (alpha) opens a warm bloom · thinking (beta) tighte
   spectrum:'Your live 3–45 Hz spectrum · color = frequency · green ring = alpha',
   butterfly:'Calm holds the wings still · arousal flaps them & summons an energetic flock',
   drift:'Theta deepens · dreamy butterflies drift in',
-  scenes:'The scene follows your brain state' };
+  sky:'Alpha widens the sky · close your eyes and the colour opens through the branches',
+  veil:'Light through rippled glass · calm slows the smoke almost to rest' };
+
+// ============================================================================
+//  PUBLIC DEMONSTRATION
+//  The published page carries no Bluetooth code and no link to Control. If nothing
+//  has been broadcast for a few seconds it runs a SIMULATED signal so a visitor
+//  sees the work move rather than a dead screen, and it says so on the page. It
+//  stands down the instant a real Control window starts broadcasting on this
+//  machine, so the same file serves both the website and the live performance.
+//
+//  The label is not optional. A page showing invented brain data without saying so
+//  would misrepresent the work, which is the opposite of what this piece is for.
+// ============================================================================
+let demoOn=false, demoT=0;
+function demoStep(dt){
+  demoT+=dt;
+  const cycle=Math.sin(demoT*2*Math.PI/26);          // a slow eyes-open / eyes-closed rhythm
+  const closed=Math.max(0,cycle);
+  Ftarget.Alpha = Math.max(0, 0.09 + closed*0.62 + Math.sin(demoT*0.90)*0.030);
+  Ftarget.Theta = Math.max(0, 0.22 + Math.max(0,-cycle)*0.20 + Math.sin(demoT*0.31)*0.050);
+  Ftarget.Beta  = Math.max(0, 0.38 - closed*0.22 + Math.sin(demoT*0.53)*0.050);
+  Ftarget.Delta = Math.max(0, 0.26 + Math.sin(demoT*0.17)*0.060);
+  Ftarget.Gamma = Math.max(0, 0.10 + Math.sin(demoT*0.71)*0.040);
+  Ftarget.FAA   = 0.5 + Math.sin(demoT*0.13)*0.16;
+  Ftarget.TB=0.5; Ftarget.HRV=0.5; Ftarget.LZ=0.5;
+  curState = closed>0.45 ? 'Relaxed' : (Ftarget.Beta>0.42 ? 'Focused' : 'Neutral');
+  for(let k=0;k<49;k++){
+    if(k<3){ specTarget[k]=0; continue; }
+    const al=Math.exp(-Math.pow((k-10)/2.2,2))*Ftarget.Alpha*1.45;
+    const th=Math.exp(-Math.pow((k- 6)/2.0,2))*Ftarget.Theta*0.90;
+    const bt=Math.exp(-Math.pow((k-20)/6.0,2))*Ftarget.Beta *0.50;
+    specTarget[k]=Math.min(1, al+th+bt+0.05);
+  }
+}
 
 resize();
+let lastTick=performance.now(), pageStart=performance.now();
 function tick(){
-  const rx=performance.now()-lastRx<3000;
+  const now0=performance.now(), dt=Math.min(0.1,(now0-lastTick)/1000); lastTick=now0;
+  const rx=now0-lastRx<3000;
+  demoOn = !rx && (now0-pageStart)>4000;      // give a real Control four seconds to appear
+  if(demoOn) demoStep(dt);
   const breath=stepBreath();
   easeSignals();
   alphaSmooth += (F.Alpha - alphaSmooth)*0.12;
@@ -593,20 +999,20 @@ function tick(){
   else if(mode==='spectrum') drawSpectrum2(breath);
   else if(mode==='butterfly') drawButterfly(breath,'gamma');
   else if(mode==='drift') drawButterfly(breath,'theta');
-  else if(mode==='scenes'){ const now=performance.now();
-    if(now-lastSceneT>8000){ const keys=Object.keys(SCENES); const s=sceneFor();
-      if(s!==curScene) crossfadeTo(s);                   // brain state changed → show its scene
-      else crossfadeTo(keys[(keys.indexOf(curScene)+1)%keys.length]);   // else rotate so it always moves
-      lastSceneT=now; }
-    scFront.style.transform='scale(1.03)';               // static — no drifting zoom
-    ctx.clearRect(0,0,w,h); alphaBloom(breath); }
+  else if(mode==='sky') drawSky(breath);                 // its own violet palette — no green alpha bloom
+  else if(mode==='veil') drawVeil(breath);               // white caustic light — no green alpha bloom either
   const aPct=Math.min(100,alphaSmooth*140);
   alphaFill.style.width=aPct+'%';
   const closed=alphaSmooth>0.32;
   eyesEl.textContent=closed?'eyes closed':'eyes open'; eyesEl.classList.toggle('closed',closed);
-  captionEl.textContent=rx?(CAPTION[mode]||''):''; captionEl.classList.toggle('force',closed);
-  statusEl.textContent = rx?('Receiving ✓ · '+curState):'Waiting for Control…'; statusEl.style.color=rx?'#22c55e':'#8b95a8';
-  bpmEl.textContent=rx?(breathBpm().toFixed(0)+' br/min'):'--'; waitEl.classList.toggle('hide',rx);
+  captionEl.textContent = rx ? (CAPTION[mode]||'')
+                          : demoOn ? ((CAPTION[mode]||'')+'  ·  simulated signal, no headband connected') : '';
+  captionEl.classList.toggle('force',closed);
+  statusEl.textContent = rx ? ('Receiving ✓ · '+curState)
+                        : demoOn ? ('Simulated signal · '+curState) : 'starting…';
+  statusEl.style.color = rx?'#22c55e' : demoOn?'#8b95a8' : '#5b647a';
+  bpmEl.textContent=(rx||demoOn)?(breathBpm().toFixed(0)+' br/min'):'--';
+  waitEl.classList.toggle('hide', rx||demoOn);
   requestAnimationFrame(tick); }
 
 document.getElementById('presentBtn').addEventListener('click', () => {
