@@ -117,7 +117,7 @@ function dominant(){ return BANDS.map(k=>[k,F[k]]).sort((a,b)=>b[1]-a[1]); }
 function kv(name){ const k=route[name]; return (k&&k!=='none')?(F[k]||0):0; }
 
 const canvas=document.getElementById('art'), ctx=canvas.getContext('2d');
-function resize(){ canvas.width=innerWidth; canvas.height=innerHeight; initAurora(); } addEventListener('resize',resize);
+function resize(){ canvas.width=innerWidth; canvas.height=innerHeight; initAurora(); skyTreeKey=''; } addEventListener('resize',resize);
 
 // --- GUIDED BREATH: a smooth slow oscillator, NOT the unreliable PPG heartbeat.
 let breathPhase=0;
@@ -554,20 +554,109 @@ function initSky(){
   skyStars=[];  for(let i=0;i<80;i++) skyStars.push({ x:R(), y:R()*0.62, r:0.4+R()*1.4, ph:R()*6.283, sp:0.5+R()*1.5 });
   skyMotes=[];  for(let i=0;i<30;i++) skyMotes.push({ x:R(), y:R(), s:0.4+R()*0.7, ph:R()*6.283, sp:0.10+R()*0.16, dr:(R()-0.5)*0.5 });
 }
-// One tree, regrown identically every frame from a fixed seed; only the sway differs.
-function skyBranch(x,y,len,ang,wd,d,sway,R){
-  if(d>9||len<3.2) return;
-  const a=ang+sway*(0.02+d*0.028)*Math.sin(skyT*0.75+d*0.85);
-  const x2=x+Math.cos(a)*len, y2=y+Math.sin(a)*len;
-  const bow=len*0.07*(d%2?1:-1);
-  ctx.lineWidth=Math.max(0.55,wd); ctx.beginPath(); ctx.moveTo(x,y);
-  ctx.quadraticCurveTo(x+Math.cos(a)*len*0.5-Math.sin(a)*bow, y+Math.sin(a)*len*0.5+Math.cos(a)*bow, x2, y2);
-  ctx.stroke();
-  const n=(d<2)?2:(R()<0.30?3:2);
-  for(let i=0;i<n;i++){
-    const spread=(0.30+R()*0.40)*((i%2)?1:-1)+(R()-0.5)*0.20;
-    skyBranch(x2,y2,len*(0.66+R()*0.15), a+spread, wd*0.64, d+1, sway, R);
+// The tree is BUILT ONCE into a flat list of segments, not regrown by recursion on
+// every frame. The old version ran 2,657 recursive strokes per frame, each with a
+// shadowBlur — the most expensive thing in Canvas 2D — and its cost scaled with
+// canvas area, so it fell to 4 fps at 1440p and read as frozen on a projector.
+//
+// Now: geometry is computed once, sway is a cheap horizontal shear (one sine per
+// frame, not per branch), and segments are batched into a handful of width buckets
+// so the whole tree is a dozen stroke() calls instead of thousands.
+let skyTree=null, skyTreeKey='';
+// Everything soft in Sky — gradient, stars, clouds, horizon glow — is painted into a
+// HALF-RESOLUTION layer and upscaled once. Those passes were 86 radial gradients and
+// three full screens of gradient fill per frame, which is what actually made Sky
+// stall on a big screen; the branch strokes were a red herring. Half res is a
+// quarter of the pixels and nothing here has an edge sharp enough to miss it. The
+// tree is still drawn at full resolution on top, because branches DO need to be crisp.
+let skyLayer=null, skyLctx=null;
+function skyLayerCanvas(w,h){
+  const lw=Math.max(64,Math.round(w/2)), lh=Math.max(64,Math.round(h/2));
+  if(!skyLayer){ skyLayer=document.createElement('canvas'); skyLctx=skyLayer.getContext('2d'); }
+  if(skyLayer.width!==lw||skyLayer.height!==lh){ skyLayer.width=lw; skyLayer.height=lh; }
+  return skyLayer;
+}
+const SKY_BUCKETS=7;
+function buildSkyTree(w,h,horizon,scale){
+  const key=w+'x'+h;
+  if(skyTree && skyTreeKey===key) return skyTree;
+  const segs=[], R=seedRnd(7717);
+  const rootY=horizon+scale*0.045;
+  let minY=rootY;
+  (function grow(x,y,len,ang,wd,d){
+    if(d>9||len<3.2) return;
+    const x2=x+Math.cos(ang)*len, y2=y+Math.sin(ang)*len;
+    const bow=len*0.07*(d%2?1:-1);
+    segs.push({ x1:x, y1:y,
+      qx:x+Math.cos(ang)*len*0.5-Math.sin(ang)*bow, qy:y+Math.sin(ang)*len*0.5+Math.cos(ang)*bow,
+      x2, y2, w:Math.max(0.55,wd), d,
+      pa:Math.cos(d*0.85), pb:Math.sin(d*0.85) });          // per-branch phase, no per-frame trig
+    if(y2<minY) minY=y2;
+    const n=(d<2)?2:(R()<0.30?3:2);
+    for(let i=0;i<n;i++){
+      const spread=(0.30+R()*0.40)*((i%2)?1:-1)+(R()-0.5)*0.20;
+      grow(x2,y2,len*(0.66+R()*0.15), ang+spread, wd*0.64, d+1);
+    }
+  })(w*0.52, rootY, scale*0.172, -Math.PI/2, scale*0.021, 0);
+
+  // height factor: the canopy sways, the trunk barely moves
+  const span=Math.max(1, rootY-minY);
+  let wMax=0; for(const g of segs) if(g.w>wMax) wMax=g.w;
+  for(const g of segs){
+    g.h1=Math.pow(Math.max(0,(rootY-g.y1)/span),1.5);
+    g.hq=Math.pow(Math.max(0,(rootY-g.qy)/span),1.5);
+    g.h2=Math.pow(Math.max(0,(rootY-g.y2)/span),1.5);
+    g.bucket=Math.min(SKY_BUCKETS-1, Math.floor(Math.pow(g.w/wMax,0.45)*SKY_BUCKETS));
   }
+  const buckets=Array.from({length:SKY_BUCKETS},()=>({w:0,segs:[]}));
+  for(const g of segs){ const b=buckets[g.bucket]; b.segs.push(g); if(g.w>b.w) b.w=g.w; }
+  skyTree={ buckets:buckets.filter(b=>b.segs.length), count:segs.length, rootY, span };
+  skyTreeKey=key;
+  return skyTree;
+}
+function drawSkyTree(swayPx){
+  const t=skyTree, k1=Math.sin(skyT*0.75), k2=Math.cos(skyT*0.75);
+  for(const b of t.buckets){
+    ctx.lineWidth=b.w;
+    ctx.beginPath();
+    for(const g of b.segs){
+      const amp=swayPx*(0.30+g.d*0.12)*(g.pa*k1+g.pb*k2);
+      ctx.moveTo(g.x1+amp*g.h1, g.y1);
+      ctx.quadraticCurveTo(g.qx+amp*g.hq, g.qy, g.x2+amp*g.h2, g.y2);
+    }
+    ctx.stroke();                                    // one stroke for the whole bucket
+  }
+}
+// The halo is the tree redrawn into a tenth-size canvas and stretched back up. Wide
+// translucent strokes at full size do NOT work: a dozen of them overlap and pile into
+// a hard white outline round the canopy instead of a glow. Downsample-upsample is the
+// same trick Veil uses, and the upscaling filter does the blurring for free.
+let skyGlow=null, skyGctx=null;
+function drawSkyTreeHalo(w,h,swayPx,colour,strength){
+  const gw=Math.max(24,Math.round(w/5)), gh=Math.max(16,Math.round(h/5));   // /5 keeps the glow tight to the branches
+  if(!skyGlow){ skyGlow=document.createElement('canvas'); skyGctx=skyGlow.getContext('2d'); }
+  if(skyGlow.width!==gw||skyGlow.height!==gh){ skyGlow.width=gw; skyGlow.height=gh; }
+  const G=skyGctx, sx=gw/w, sy=gh/h;
+  G.setTransform(1,0,0,1,0,0); G.clearRect(0,0,gw,gh);
+  G.setTransform(sx,0,0,sy,0,0);
+  G.lineCap='round'; G.lineJoin='round'; G.strokeStyle=colour;
+  const t=skyTree, k1=Math.sin(skyT*0.75), k2=Math.cos(skyT*0.75);
+  for(const b of t.buckets){
+    G.lineWidth=b.w+ (1/sx)*0.9;                       // a touch fatter so it survives the shrink
+    G.beginPath();
+    for(const g of b.segs){
+      const amp=swayPx*(0.30+g.d*0.12)*(g.pa*k1+g.pb*k2);
+      G.moveTo(g.x1+amp*g.h1, g.y1);
+      G.quadraticCurveTo(g.qx+amp*g.hq, g.qy, g.x2+amp*g.h2, g.y2);
+    }
+    G.stroke();
+  }
+  G.setTransform(1,0,0,1,0,0);
+  ctx.globalCompositeOperation='screen';
+  ctx.globalAlpha=strength;
+  ctx.drawImage(skyGlow,0,0,gw,gh,0,0,w,h);
+  ctx.globalAlpha=1;
+  ctx.globalCompositeOperation='source-over';
 }
 // ============================================================================
 //  VEIL (2026-08-23) — light through rippled glass falling down a wall, with the
@@ -806,71 +895,81 @@ function drawSky(breath){
   const spread=0.16+a*0.52;                                 // how far up the rose field climbs
   const horizon=h*0.84, cx=w*0.52;
 
+  // --- soft passes, painted at half resolution into skyLayer ---
+  const SL=skyLayerCanvas(w,h), S=skyLctx, SX=SL.width/w, SY=SL.height/h;
+  S.globalCompositeOperation='source-over';
   // 1 — the sky itself. A blue hour, not a night: deep cobalt above, cerulean, then
   //     periwinkle, with the rose only at the hem. Hue is anchored at every alpha;
   //     alpha changes the reach of the rose and lifts the whole frame a little.
-  const g=ctx.createLinearGradient(0,0,0,h);
+  const g=S.createLinearGradient(0,0,0,h*SY);
   g.addColorStop(0,    `hsl(224,${52+a*8}%,${11+a*7}%)`);
   g.addColorStop(0.34, `hsl(212,${56+a*10}%,${18+a*11}%)`);
   g.addColorStop(Math.max(0.40,Math.min(0.84,1-spread*0.78)), `hsl(232,${52+a*12}%,${25+a*14}%)`);
   g.addColorStop(0.88, `hsl(318,${48+a*18}%,${31+a*20}%)`);
   g.addColorStop(1,    `hsl(338,${50+a*16}%,${27+a*17}%)`);
-  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  S.fillStyle=g; S.fillRect(0,0,w*SX,h*SY);
 
   // 2 — stars, only in the upper sky; they surface as the sky opens.
-  ctx.globalCompositeOperation='screen';
+  S.globalCompositeOperation='screen';
   for(const s of skyStars){
     const tw=0.5+0.5*Math.sin(skyT*s.sp*3+s.ph);
     const op=(0.05+a*0.30)*tw; if(op<0.02) continue;
-    ctx.fillStyle=`hsla(205,55%,94%,${op})`;
-    ctx.beginPath(); ctx.arc(s.x*w, s.y*h*0.9, s.r*(0.7+a*0.6), 0, Math.PI*2); ctx.fill();
+    S.fillStyle=`hsla(205,55%,94%,${op})`;
+    S.beginPath(); S.arc(s.x*w*SX, s.y*h*0.9*SY, Math.max(0.4,s.r*(0.7+a*0.6)*SX), 0, Math.PI*2); S.fill();
   }
 
   // 3 — cloud patches. Each is a run of soft lobes with a body and a lit underside,
   //     so they read as cloud rather than haze. Monet still: no edge is ever hard.
   for(const c of skyClouds){
-    const px=(((c.x + c.dir*skyT*c.sp*0.05)%1.4+1.4)%1.4-0.2)*w;
-    const py=(c.y + Math.sin(skyT*c.sp*0.8+c.ph)*0.022)*h;
-    const cw=w*c.w*(0.86+spread*0.44)*(0.97+breath*0.05), chh=cw*0.33;
-    const near=Math.max(0, 1-Math.abs(py-horizon)/(h*0.72));   // low clouds catch more of the glow
+    const px=(((c.x + c.dir*skyT*c.sp*0.05)%1.4+1.4)%1.4-0.2)*w*SX;
+    const py=(c.y + Math.sin(skyT*c.sp*0.8+c.ph)*0.022)*h*SY;
+    const cw=w*SX*c.w*(0.86+spread*0.44)*(0.97+breath*0.05), chh=cw*0.33;
+    const near=Math.max(0, 1-Math.abs(py-horizon*SY)/(h*SY*0.72));   // low clouds catch more of the glow
     const body=(0.12+a*0.26)*(0.78+0.22*Math.sin(skyT*0.45+c.ph));
     const lit =(0.05+a*0.26)*near;
     for(const l of c.lobes){
       const lx=px+l.dx*cw*0.5, ly=py+l.dy*chh*0.5, r=l.r*chh;
-      const rg=ctx.createRadialGradient(lx,ly-r*0.18,0,lx,ly,r);
+      const rg=S.createRadialGradient(lx,ly-r*0.18,0,lx,ly,r);
       rg.addColorStop(0,   `hsla(${c.hue},70%,${74+a*8}%,${body})`);
       rg.addColorStop(0.48,`hsla(${c.hue+10},66%,${64+a*8}%,${body*0.46})`);
       rg.addColorStop(1,   `hsla(${c.hue+18},62%,58%,0)`);
-      ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(lx,ly,r,0,Math.PI*2); ctx.fill();
+      S.fillStyle=rg; S.beginPath(); S.arc(lx,ly,r,0,Math.PI*2); S.fill();
       if(lit>0.012){                                            // rose caught on the underside
         const ur=r*0.72, uy=ly+r*0.34;
-        const ug=ctx.createRadialGradient(lx,uy,0,lx,uy,ur);
+        const ug=S.createRadialGradient(lx,uy,0,lx,uy,ur);
         ug.addColorStop(0,  `hsla(330,86%,78%,${lit})`);
         ug.addColorStop(0.5,`hsla(316,78%,70%,${lit*0.40})`);
         ug.addColorStop(1,  'hsla(300,70%,64%,0)');
-        ctx.fillStyle=ug; ctx.beginPath(); ctx.arc(lx,uy,ur,0,Math.PI*2); ctx.fill();
+        S.fillStyle=ug; S.beginPath(); S.arc(lx,uy,ur,0,Math.PI*2); S.fill();
       }
     }
   }
 
   // 4 — the horizon glow behind the tree. This is the widening: it opens with alpha.
-  const hr=Math.max(w,h)*(0.26+a*0.52)*(0.95+breath*0.09);
-  const hg=ctx.createRadialGradient(cx,horizon,0,cx,horizon,hr);
+  const hr=Math.max(w*SX,h*SY)*(0.26+a*0.52)*(0.95+breath*0.09);
+  const hg=S.createRadialGradient(cx*SX,horizon*SY,0,cx*SX,horizon*SY,hr);
   hg.addColorStop(0,    `hsla(334,86%,76%,${0.10+a*0.30})`);
   hg.addColorStop(0.28, `hsla(310,78%,68%,${0.05+a*0.15})`);
   hg.addColorStop(0.58, `hsla(258,74%,64%,${0.02+a*0.07})`);
   hg.addColorStop(1,    'hsla(212,76%,60%,0)');
-  ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(cx,horizon,hr,0,Math.PI*2); ctx.fill();
+  S.fillStyle=hg; S.beginPath(); S.arc(cx*SX,horizon*SY,hr,0,Math.PI*2); S.fill();
+  S.globalCompositeOperation='source-over';
+
+  // blit the soft layer up to full size; the smoothing on the upscale is free diffusion
   ctx.globalCompositeOperation='source-over';
+  ctx.drawImage(SL,0,0,SL.width,SL.height,0,0,w,h);
 
   // 5 — the tree, near-black so the sky reads through the branches.
   const scale=Math.min(w,h);
+  buildSkyTree(w,h,horizon,scale);
   ctx.save();
-  ctx.strokeStyle='rgba(10,14,30,0.93)'; ctx.lineCap='round'; ctx.lineJoin='round';   // blue-black, not dead black
-  ctx.shadowColor=`hsla(326,84%,70%,${0.22+a*0.44})`; ctx.shadowBlur=scale*(0.010+a*0.030);
-  const sway=0.55+breath*0.35;
-  skyBranch(cx, horizon+scale*0.045, scale*0.172, -Math.PI/2, scale*0.021, 0, sway, seedRnd(7717));
-  ctx.shadowBlur=0;
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  const swayPx=scale*0.018*(0.55+breath*0.35);
+  // The rose halo is now ONE wide translucent pass under the tree, not a shadowBlur
+  // on every branch. Same look, and it costs a dozen strokes instead of thousands.
+  drawSkyTreeHalo(w,h,swayPx,'hsl(326,84%,70%)',0.05+a*0.13);
+  ctx.strokeStyle='rgba(10,14,30,0.93)';                                   // blue-black, not dead black
+  drawSkyTree(swayPx);
   // ground: a low soft band so the trunk is planted, not floating
   const gr=ctx.createLinearGradient(0,horizon-scale*0.02,0,h);
   gr.addColorStop(0,'rgba(14,20,44,0)'); gr.addColorStop(0.35,'rgba(13,19,42,0.70)'); gr.addColorStop(1,'rgba(8,12,28,0.95)');
