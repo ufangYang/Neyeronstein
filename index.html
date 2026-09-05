@@ -1210,6 +1210,7 @@ function makeNoise(){ const len=Math.floor(actx.sampleRate*2), b=actx.createBuff
   for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*0.5; return b; }
 function startAudio(){ if(sndKind==='off'){ actx=null; return; }
   try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ actx=null; return; }
+  try{ actx.resume(); }catch(e){}                       // some browsers start the context suspended
   aMaster=actx.createGain(); aMaster.gain.value=0; aMaster.connect(actx.destination); aNodes={};
   if(sndKind==='pad'){ const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=520; lp.Q.value=0.6; lp.connect(aMaster);
     aNodes.osc=[]; for(const [mult,det,g] of PAD_PARTS){ const o=actx.createOscillator(); o.type='sine'; o.frequency.value=PAD_BASE*mult; o.detune.value=det;
@@ -1262,7 +1263,7 @@ function markSnd(){ [...breathAudioBox.children].forEach(b=>b.classList.toggle('
 markSnd();
 breathAudioBox.addEventListener('click', e=>{ e.stopPropagation(); const b=e.target.closest('button'); if(!b) return;
   sndKind=b.dataset.snd; try{ localStorage.setItem('ney_breath_snd',sndKind); }catch(_){} markSnd();
-  if(breathing){ stopAudio(); setTimeout(()=>{ if(breathing) startAudio(); }, 140); } });
+  if(breathing){ stopAudio(); startAudio(); } });   // restart in the click gesture so the new voice is allowed to play
 
 tick();
 </script>
