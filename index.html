@@ -67,8 +67,6 @@
       <button data-mode="bloom" class="on">Bloom</button>
       <button data-mode="plasma">Plasma</button>
       <button data-mode="chiffon">Chiffon</button>
-      <button data-mode="butterfly">Butterfly</button>
-      <button data-mode="drift">Drift</button>
       <button data-mode="sky">Sky</button>
       <button data-mode="veil">Veil</button>
     </div>
@@ -1053,8 +1051,6 @@ const statusEl=document.getElementById('status'), bpmEl=document.getElementById(
 const CAPTION={ bloom:'Calm (alpha) opens a warm bloom · thinking (beta) tightens it cool',
   plasma:'Live EEG per band · tap Waves / Trends · high-pass set in Control',
   chiffon:'Light curtains fly on alpha · beta spins the flow · colour runs gold→green→blue→purple→pale from the core out',
-  butterfly:'Calm holds the wings still · arousal flaps them & summons an energetic flock',
-  drift:'Theta deepens · dreamy butterflies drift in',
   sky:'Alpha widens the sky · close your eyes and the colour opens through the branches',
   veil:'Light through rippled glass · calm slows the smoke almost to rest' };
 
@@ -1120,8 +1116,6 @@ function tick(){
   if(mode==='bloom') drawBloom(breath);
   else if(mode==='plasma') drawPlasma(breath);
   else if(mode==='chiffon') drawChiffon(breath);
-  else if(mode==='butterfly') drawButterfly(breath,'gamma');
-  else if(mode==='drift') drawButterfly(breath,'theta');
   else if(mode==='sky') drawSky(breath);                 // its own violet palette — no green alpha bloom
   else if(mode==='veil') drawVeil(breath);               // white caustic light — no green alpha bloom either
   const aPct=Math.min(100,alphaSmooth*140);
