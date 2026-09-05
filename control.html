@@ -257,9 +257,9 @@ mkNode('power','PowerBands','#f59e0b',740,86,['b'],['f'],
    <div style="color:#5b647a;font-size:9px;margin-top:2px;">drag up to force the Bloom open &amp; reveal the rainbow (0 = live EEG)</div>`);
 mkNode('sig','Signal quality','#38bdf8',260,300,['s'],[],
   `<div id="sigRows" style="font-size:11px;line-height:1.7;">—</div>
-   <div style="margin-top:7px;color:#7f8aa0;font-size:11px;display:flex;justify-content:space-between;align-items:center;"><span>Artefact gate</span><label style="color:#e8ecf3;cursor:pointer;"><input type="checkbox" id="gateChk" checked> on</label></div>
-   <div style="color:#7f8aa0;font-size:11px;display:flex;justify-content:space-between;margin-top:4px;"><span>Reject above</span><span><span id="gateVal">120</span> µV</span></div>
-   <input id="gateSl" type="range" min="40" max="400" step="5" value="120" style="width:100%">
+   <div style="margin-top:7px;color:#7f8aa0;font-size:11px;display:flex;justify-content:space-between;align-items:center;"><span>Artefact gate</span><label style="color:#e8ecf3;cursor:pointer;"><input type="checkbox" id="gateChk"> on</label></div>
+   <div style="color:#7f8aa0;font-size:11px;display:flex;justify-content:space-between;margin-top:4px;"><span>Reject above</span><span><span id="gateVal">150</span> µV</span></div>
+   <input id="gateSl" type="range" min="40" max="400" step="5" value="150" style="width:100%">
    <div style="color:#5b647a;font-size:9px;margin-top:2px;">blinks / jaw-clench spikes above this are dropped so they can't jump the visuals</div>
    <div id="gateState" style="margin-top:4px;font-size:11px;color:#22c55e;">clean</div>`);
 mkNode('feat','Features','#ef4444',740,300,['f'],['o'],
@@ -310,7 +310,7 @@ const cRaw=document.getElementById('cRaw').getContext('2d');
 const cPsd=document.getElementById('cPsd').getContext('2d');
 
 // --- per-electrode signal quality + artefact gate: the per-subject tuning tools ---
-let gateOn=true, gateThresh=120, artefact=false;
+let gateOn=false, gateThresh=150, artefact=false, artStart=0;   // gate OFF by default so it can never be why the visuals look stuck
 function chRms(c){ let m=0; for(let i=0;i<N;i++) m+=buffers[c][i]; m/=N; let s=0; for(let i=0;i<N;i++){ const v=buffers[c][i]-m; s+=v*v; } return Math.sqrt(s/N); }
 function chPeak(c){ let m=0; for(let i=0;i<N;i++) m+=buffers[c][i]; m/=N; let mx=0; for(let i=0;i<N;i++){ const a=Math.abs(buffers[c][i]-m); if(a>mx)mx=a; } return mx; }
 function qualOf(rms){ if(rms<0.6) return ['flat','#ef4444']; if(rms>70) return ['noisy','#ef4444']; if(rms>40) return ['fair','#f59e0b']; return ['good','#22c55e']; }
@@ -342,10 +342,16 @@ const calNote=document.getElementById('calNote');
 document.getElementById('calBtn').addEventListener('click',()=>{ calibrating=true; calStart=performance.now(); calAcc={}; calCount=0; calNote.textContent='calibrating… neutral eyes-open rest'; });
 
 const F={}; let lastLZ=0,lastLZt=0,lastConn=[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],lastCt=0,lastSpecT=0,lastStoryT=0,lastPcaT=0;
-function tick(){
+// COMPUTE runs on a timer, not requestAnimationFrame, so the band powers keep updating even when
+// the Control tab is hidden behind the projected Visualiser (rAF pauses on hidden tabs — that was
+// the bug where the flower stopped opening the moment you looked at the visuals). The silent
+// keep-alive tone keeps this timer at full rate while backgrounded.
+function compute(){
+  const now=performance.now();
   const r=computeAll();
-  artefact=false;                                       // artefact gate: a blink/EMG spike this window → hold, don't jump the bands
+  artefact=false;                                       // artefact gate (optional): a blink/EMG spike this window → hold the bands
   if(gateOn && filled>=N){ let pk=0; for(let c=0;c<CH;c++){ const p=chPeak(c); if(p>pk)pk=p; } if(pk>gateThresh) artefact=true; }
+  if(artefact){ if(now-artStart>1500) artefact=false; } else { artStart=now; }   // release valve: never freeze longer than 1.5 s
   if(r){ if(!artefact){ for(const k in BANDS) bandVals[k]+=(r.rel[k]-bandVals[k])*ctrl.smooth; }
     if(baseReady){                                    // BASELINE-RELATIVE: score each band vs YOUR own rest (one-sided z)
       const span=3.0-(ctrl.sens/100)*2.0;             // so resting stays ~0 (calm) and only real increases light up
@@ -356,31 +362,33 @@ function tick(){
     }
     F.FAA=norm('FAA',r.FAA); F.TB=norm('TB',r.thetaBeta);
     pcaBuf.push([r.rel.Delta,r.rel.Theta,r.rel.Alpha,r.rel.Beta,r.rel.Gamma]); if(pcaBuf.length>160) pcaBuf.shift(); }
-  const now=performance.now();
   if(now-lastLZt>1000&&filled>=N){ lastLZt=now; lastLZ=computeLZ(); }
   if(now-lastCt>250&&filled>=N){ lastCt=now; lastConn=connMatrix(); }
   F.LZ=norm('LZ',lastLZ); F.HRV=norm('HRV',rmssd(ibisAll)); F.SE=norm('SE',specEntropy());
   if(now-lastPcaT>300 && filled>=N){ lastPcaT=now; const pc=computePCA();
     F.PC1=norm('PC1',pc[0]); F.PC2=norm('PC2',pc[1]); pcaHist.push([F.PC1,F.PC2]); if(pcaHist.length>60) pcaHist.shift(); }
-  pulse*=0.90; heartGlyph.style.transform=`scale(${1+pulse*0.5})`;
-
   if(calibrating){ for(const k in BANDS){ calSum[k]=(calSum[k]||0)+bandVals[k]; calSq[k]=(calSq[k]||0)+bandVals[k]*bandVals[k]; } calCount++;
     if(now-calStart>40000){ calibrating=false; baseReady=true;
       for(const k in BANDS){ const mu=calSum[k]/calCount; baseMu[k]=mu; baseSd[k]=Math.max(1e-4,Math.sqrt(Math.max(0,calSq[k]/calCount-mu*mu))); baseMean[k]=0; }
       calNote.textContent='baseline set ✓ — visuals now track vs your rest'; } }
+  const cand=classifyState();                          // classify + 1.2s hysteresis so it doesn't flicker
+  if(cand!==stateHold){ stateHold=cand; stateSince=now; } else if(now-stateSince>1200) curState=cand;
+}
+setInterval(compute, 40);
 
+function draw(){                                        // DRAW is visual only — safe to pause when hidden
+  pulse*=0.90; if(heartGlyph) heartGlyph.style.transform=`scale(${1+pulse*0.5})`;
   drawRaw(); drawPsd(); drawSig();
   for(const k in BANDS) barEl[k].style.height=Math.min(100,(F[k]||0)*100)+'%';
   for(const [k] of DER){ const v=F[k]||0; ftV[k].textContent=Math.round(v*100);
     if(baseMean[k]!==undefined){ const d=Math.round((v-baseMean[k])*100); ftD[k].textContent=(d>=0?'+':'')+d; ftD[k].style.color=d>=0?'#22c55e':'#ef4444'; } }
   const dm=dominant(F,useBand); if(dm.length) outDom.innerHTML=`<b style="color:${BAND_COLORS[dm[0][0]]}">${dm[0][0]}</b> ${Math.round((dm[0][1]||0)*100)}`;
-  const cand=classifyState();                        // classify + 1.2s hysteresis so it doesn't flicker
-  if(cand!==stateHold){ stateHold=cand; stateSince=now; } else if(now-stateSince>1200) curState=cand;
   stateLabelEl.textContent='state: '+curState;
-  const live=lastPacket>0&&now-lastPacket<600; museState.textContent=live?'streaming ✓':(lastPacket?'signal lost':'idle'); museState.style.color=live?'#22c55e':'#7f8aa0';
+  const now=performance.now(); const live=lastPacket>0&&now-lastPacket<600;
+  museState.textContent=live?'streaming ✓':(lastPacket?'signal lost':'idle'); museState.style.color=live?'#22c55e':'#7f8aa0';
   bpmEl.textContent=bpm?bpm:'--';
   drawWires();
-  requestAnimationFrame(tick);
+  requestAnimationFrame(draw);
 }
 
 const statusEl=document.getElementById('status'); const setStatus=t=>statusEl.textContent=t;
@@ -451,7 +459,7 @@ function saveCsv(){ if(!recRows.length) return;
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 500); }
 recBtn.addEventListener('click', ()=> recording?stopRec():startRec());
 saveBtn.addEventListener('click', saveCsv);
-tick();
+draw();
 </script>
 </body>
 </html>
