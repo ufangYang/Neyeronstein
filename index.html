@@ -68,13 +68,25 @@
   /* --- GUIDED BREATH overlay --- */
   #breath { position:fixed; inset:0; z-index:9; display:none; align-items:center; justify-content:center;
     flex-direction:column; pointer-events:none; opacity:0; transition:opacity .8s ease;
-    background:radial-gradient(120% 100% at 50% 50%, rgba(4,6,12,0.30), rgba(4,6,12,0.55)); }
+    background:radial-gradient(120% 100% at 50% 50%, rgba(4,6,12,0.22), rgba(4,6,12,0.46)); }
   #breath.on { display:flex; opacity:1; pointer-events:auto; }
-  #breathRing { width:42vmin; height:42vmin; border-radius:50%; border:2px solid rgba(180,220,255,0.85);
-    box-shadow:0 0 70px rgba(140,200,255,0.5), inset 0 0 70px rgba(140,200,255,0.22);
-    display:flex; align-items:center; justify-content:center; will-change:transform; }
-  #breathWord { font-size:clamp(20px,3.4vw,36px); font-weight:600; letter-spacing:.06em; color:rgba(240,247,255,0.96); text-shadow:0 2px 26px #000; }
-  #breathSub { margin-top:5vmin; font-size:13px; letter-spacing:.16em; text-transform:uppercase; color:rgba(205,218,238,0.82); text-shadow:0 2px 14px #000; }
+  #breathStage { position:relative; width:60vmin; height:60vmin; display:flex; align-items:center; justify-content:center; }
+  /* soft chiffon veil ring: a blurred, feathered, colour-drifting halo — no hard border */
+  #breathRing { position:absolute; width:52vmin; height:52vmin; border-radius:50%; will-change:transform; opacity:.9;
+    background:conic-gradient(from 0deg,
+      hsla(46,90%,72%,.55), hsla(150,66%,64%,.5), hsla(220,74%,70%,.55), hsla(285,58%,74%,.5), hsla(300,50%,84%,.5), hsla(46,90%,72%,.55));
+    -webkit-mask:radial-gradient(circle, transparent 52%, #000 63%, #000 71%, transparent 84%);
+            mask:radial-gradient(circle, transparent 52%, #000 63%, #000 71%, transparent 84%);
+    filter:blur(7px); }
+  #breathGlow { position:absolute; width:52vmin; height:52vmin; border-radius:50%; will-change:transform; pointer-events:none;
+    background:radial-gradient(circle, rgba(200,225,255,0.16) 0%, rgba(200,225,255,0.06) 45%, transparent 66%); filter:blur(10px); }
+  #breathWord { position:absolute; font-size:clamp(20px,3.2vw,34px); font-weight:500; letter-spacing:.14em;
+    color:rgba(244,248,255,0.94); text-shadow:0 2px 30px rgba(0,0,0,.6); }
+  #breathSub { margin-top:4vmin; font-size:13px; letter-spacing:.16em; text-transform:uppercase; color:rgba(205,218,238,0.78); text-shadow:0 2px 14px #000; }
+  #breathAudio { margin-top:14px; display:flex; gap:6px; font-size:12px; }
+  #breathAudio button { padding:5px 12px; border-radius:20px; border:1px solid rgba(150,180,220,0.3);
+    background:rgba(20,26,40,0.4); color:rgba(205,218,238,0.8); font-weight:500; letter-spacing:.04em; }
+  #breathAudio button.on { background:rgba(150,200,255,0.22); color:#fff; border-color:rgba(160,200,255,0.6); }
 </style>
 </head>
 <body>
@@ -99,7 +111,16 @@
   <canvas id="art"></canvas>
   <div id="wordmark"><span class="wm-name">Neyeronstein</span><span class="wm-cr">© 2026 Yu-Fang Yang · all rights reserved</span></div>
   <div id="caption"></div>
-  <div id="breath"><div id="breathRing"><div id="breathWord">Breathe in</div></div><div id="breathSub">2-minute calm · breathe with the ring</div></div>
+  <div id="breath">
+    <div id="breathStage"><div id="breathGlow"></div><div id="breathRing"></div><div id="breathWord">Breathe in</div></div>
+    <div id="breathSub">2-minute calm · breathe with the ring</div>
+    <div id="breathAudio">
+      <button data-snd="pad" class="on">Warm pad</button>
+      <button data-snd="ocean">Ocean</button>
+      <button data-snd="bowl">Singing bowl</button>
+      <button data-snd="off">Silent</button>
+    </div>
+  </div>
   <div id="wait">
     <b>Neyeronstein</b>
     <span>starting…</span>
@@ -1175,43 +1196,73 @@ brightBtn.addEventListener('click', ()=> applyBright(!document.body.classList.co
 //  breathing near the resonance frequency raises HRV and cortical alpha; the ring and pad only
 //  guide the breath — the alpha you then see on the headband is your own.
 const breathBtn=document.getElementById('breathBtn'), breathEl=document.getElementById('breath'),
-      breathRing=document.getElementById('breathRing'), breathWord=document.getElementById('breathWord'),
-      breathSub=document.getElementById('breathSub');
+      breathRing=document.getElementById('breathRing'), breathGlow=document.getElementById('breathGlow'),
+      breathWord=document.getElementById('breathWord'), breathSub=document.getElementById('breathSub'),
+      breathAudioBox=document.getElementById('breathAudio');
 const IN_S=5.0, OUT_S=6.0, CYCLE=IN_S+OUT_S, TOTAL=120;
-let breathing=false, breathT0=0, actx=null, padMaster=null, padOsc=[], breathRAF=0;
+let breathing=false, breathT0=0, breathRAF=0, breathSpin=0, lastInhaling=null;
+
+// ---- three synthesized breath voices (no files, offline, nothing copyrighted) ----
+let sndKind='pad'; try{ const s=localStorage.getItem('ney_breath_snd'); if(s) sndKind=s; }catch(e){}
+let actx=null, aMaster=null, aNodes=null;
 const PAD_BASE=136.1, PAD_PARTS=[[1,0,0.6],[1.5,+2,0.3],[2,-3,0.16]];
+function makeNoise(){ const len=Math.floor(actx.sampleRate*2), b=actx.createBuffer(1,len,actx.sampleRate), d=b.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*0.5; return b; }
+function startAudio(){ if(sndKind==='off'){ actx=null; return; }
+  try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ actx=null; return; }
+  aMaster=actx.createGain(); aMaster.gain.value=0; aMaster.connect(actx.destination); aNodes={};
+  if(sndKind==='pad'){ const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=520; lp.Q.value=0.6; lp.connect(aMaster);
+    aNodes.osc=[]; for(const [mult,det,g] of PAD_PARTS){ const o=actx.createOscillator(); o.type='sine'; o.frequency.value=PAD_BASE*mult; o.detune.value=det;
+      const og=actx.createGain(); og.gain.value=g; o.connect(og); og.connect(lp); o.start(); aNodes.osc.push(o); } }
+  else if(sndKind==='ocean'){ const src=actx.createBufferSource(); src.buffer=makeNoise(); src.loop=true;
+    const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=480; lp.Q.value=0.4;
+    src.connect(lp); lp.connect(aMaster); src.start(); aNodes.src=src; aNodes.lp=lp; }
+  else if(sndKind==='bowl'){ aMaster.gain.value=1; }   // strikes fire on phase change
+}
+function stopAudio(){ if(!actx) return; const a=actx, nodes=aNodes, m=aMaster; actx=null; aNodes=null; aMaster=null;
+  try{ if(m) m.gain.setTargetAtTime(0,a.currentTime,0.4); }catch(e){}
+  setTimeout(()=>{ try{ if(nodes&&nodes.osc) nodes.osc.forEach(o=>o.stop()); if(nodes&&nodes.src) nodes.src.stop(); }catch(e){} try{a.close()}catch(e){} }, 1000); }
+function strikeBowl(freq){ if(!actx) return; const t=actx.currentTime, g=actx.createGain();
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.15,t+0.06); g.gain.exponentialRampToValueAtTime(0.0001,t+3.4); g.connect(actx.destination);
+  [[1,0.6],[2.01,0.24],[2.76,0.12]].forEach(([m,gg])=>{ const o=actx.createOscillator(); o.type='sine'; o.frequency.value=freq*m;
+    const og=actx.createGain(); og.gain.value=gg; o.connect(og); og.connect(g); o.start(t); o.stop(t+3.6); }); }
+function audioUpdate(scale){ if(!actx||!aMaster) return;
+  if(sndKind==='pad'){ aMaster.gain.setTargetAtTime(0.02+scale*0.11, actx.currentTime,0.12);
+    aNodes.osc.forEach((o,i)=>o.frequency.setTargetAtTime(PAD_BASE*PAD_PARTS[i][0]*(1+scale*0.03), actx.currentTime,0.2)); }
+  else if(sndKind==='ocean'){ aMaster.gain.setTargetAtTime(0.012+scale*0.17, actx.currentTime,0.15);
+    aNodes.lp.frequency.setTargetAtTime(280+scale*950, actx.currentTime,0.2); } }
+function audioPhase(inhaling){ if(sndKind==='bowl') strikeBowl(inhaling?294:196); }   // D4 in, G3 out
+
 function breathEnv(t){ const tc=t%CYCLE, inhaling=tc<IN_S, u=inhaling?tc/IN_S:(tc-IN_S)/OUT_S;
   const e=0.5-0.5*Math.cos(Math.PI*u); return { scale: inhaling?e:1-e, inhaling }; }
-function startPad(){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ return; }
-  padMaster=actx.createGain(); padMaster.gain.value=0; padMaster.connect(actx.destination);
-  const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=520; lp.Q.value=0.6; lp.connect(padMaster);
-  for(const [mult,det,g] of PAD_PARTS){ const o=actx.createOscillator(); o.type='sine';
-    o.frequency.value=PAD_BASE*mult; o.detune.value=det; const og=actx.createGain(); og.gain.value=g;
-    o.connect(og); og.connect(lp); o.start(); padOsc.push(o); } }
-function stopPad(){ if(!actx) return; try{ padMaster.gain.setTargetAtTime(0,actx.currentTime,0.4); }catch(e){}
-  const a=actx, os=padOsc; actx=null; padOsc=[]; padMaster=null;
-  setTimeout(()=>{ os.forEach(o=>{try{o.stop()}catch(e){}}); try{a.close()}catch(e){} }, 900); }
+function paintRing(scale){ const s=0.6+scale*0.66; breathSpin+=0.14;
+  breathRing.style.transform='scale('+s+') rotate('+breathSpin+'deg)'; breathRing.style.opacity=0.55+scale*0.4;
+  breathGlow.style.transform='scale('+(s*1.03)+')'; breathGlow.style.opacity=0.35+scale*0.55; }
 function stopBreath(){ if(!breathing) return; breathing=false; cancelAnimationFrame(breathRAF);
-  breathEl.classList.remove('on'); breathBtn.classList.remove('on'); breathBtn.textContent='Breathe 2 min'; stopPad(); }
+  breathEl.classList.remove('on'); breathBtn.classList.remove('on'); breathBtn.textContent='Breathe 2 min'; stopAudio(); }
 function breathLoop(){ if(!breathing) return;
   const t=(performance.now()-breathT0)/1000, left=TOTAL-t;
-  if(left<=0){ breathWord.textContent='Done'; breathSub.textContent='carry the calm with you';
-    breathRing.style.transform='scale(0.95)'; if(actx&&padMaster){ try{padMaster.gain.setTargetAtTime(0,actx.currentTime,0.6)}catch(e){} }
-    setTimeout(stopBreath,2400); return; }
+  if(left<=0){ breathWord.textContent='Done'; breathSub.textContent='carry the calm with you'; paintRing(0.5);
+    if(actx&&aMaster){ try{aMaster.gain.setTargetAtTime(0,actx.currentTime,0.6)}catch(e){} } setTimeout(stopBreath,2400); return; }
   const {scale,inhaling}=breathEnv(t);
-  breathRing.style.transform='scale('+(0.6+scale*0.7)+')';
-  breathRing.style.borderColor = inhaling?'rgba(165,240,200,0.92)':'rgba(150,200,255,0.85)';
+  paintRing(scale);
   breathWord.textContent = inhaling?'Breathe in':'Breathe out';
   breathSub.textContent = Math.ceil(left)+'s · breathe with the ring';
-  if(actx&&padMaster){ padMaster.gain.setTargetAtTime(0.02+scale*0.11, actx.currentTime, 0.12);
-    padOsc.forEach((o,i)=>{ o.frequency.setTargetAtTime(PAD_BASE*PAD_PARTS[i][0]*(1+scale*0.03), actx.currentTime, 0.2); }); }
+  if(lastInhaling===null || inhaling!==lastInhaling){ lastInhaling=inhaling; audioPhase(inhaling); }
+  audioUpdate(scale);
   breathRAF=requestAnimationFrame(breathLoop); }
-function startBreath(){ if(breathing) return; breathing=true; breathT0=performance.now();
+function startBreath(){ if(breathing) return; breathing=true; breathT0=performance.now(); lastInhaling=null;
   breathEl.classList.add('on'); breathBtn.classList.add('on'); breathBtn.textContent='Stop breathing';
-  breathWord.textContent='Breathe in'; startPad(); breathLoop(); }
+  breathWord.textContent='Breathe in'; startAudio(); breathLoop(); }
 breathBtn.addEventListener('click', ()=> breathing?stopBreath():startBreath());
 breathEl.addEventListener('click', stopBreath);
 addEventListener('keydown', e=>{ if(e.key==='Escape') stopBreath(); });
+// sound picker — switches the voice live without closing the overlay
+function markSnd(){ [...breathAudioBox.children].forEach(b=>b.classList.toggle('on', b.dataset.snd===sndKind)); }
+markSnd();
+breathAudioBox.addEventListener('click', e=>{ e.stopPropagation(); const b=e.target.closest('button'); if(!b) return;
+  sndKind=b.dataset.snd; try{ localStorage.setItem('ney_breath_snd',sndKind); }catch(_){} markSnd();
+  if(breathing){ stopAudio(); setTimeout(()=>{ if(breathing) startAudio(); }, 140); } });
 
 tick();
 </script>
