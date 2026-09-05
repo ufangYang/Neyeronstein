@@ -50,6 +50,8 @@
     <button id="connectBtn" class="primary">Connect Muse</button>
     <button id="simBtn">Simulate</button>
     <button id="calBtn" class="warn">Calibrate baseline (40s)</button><span id="calNote"></span>
+    <button id="recBtn" title="Record band powers to a CSV on this computer (~10 Hz)">● Record</button>
+    <button id="saveBtn" title="Save the recording as a CSV file" disabled>Save CSV</button><span id="recNote" style="font-size:11px;color:#7f8aa0;"></span>
     <span id="status">Not connected.</span>
     <div class="spacer"></div>
     <div id="heart" title="Muse 2 heart rate"><span class="hh">♥</span><span id="bpm">--</span> bpm</div>
@@ -433,6 +435,32 @@ function keepAlive(){ if(keptAlive) return; try { const ac=new (window.AudioCont
 
 window.__muse={ onReading,onPpg,ctrl,F,state:()=>({filled,writePos,lastPacket,bpm}) };
 addEventListener('resize',drawWires);
+
+// ---- LOCAL RECORDING: log band powers (~10 Hz) to a CSV saved on THIS computer. Nothing is
+//  uploaded — the file is written straight to your Downloads by the browser. Works with a live
+//  Muse or with Simulate. Columns: time, ISO clock, the five bands, FAA/Focus/Calm, state, bpm.
+const recBtn=document.getElementById('recBtn'), saveBtn=document.getElementById('saveBtn'), recNote=document.getElementById('recNote');
+let recording=false, recStart=0, recTimer=0; const recRows=[];
+const REC_COLS=['t_s','iso','Delta','Theta','Alpha','Beta','Gamma','FAA','TB','HRV','state','bpm'];
+function recTick(){ if(!recording) return; const t=(performance.now()-recStart)/1000;
+  recRows.push([ t.toFixed(2), new Date().toISOString(),
+    (F.Delta||0).toFixed(4),(F.Theta||0).toFixed(4),(F.Alpha||0).toFixed(4),(F.Beta||0).toFixed(4),(F.Gamma||0).toFixed(4),
+    (F.FAA??0.5).toFixed(4),(F.TB??0.5).toFixed(4),(F.HRV??0.5).toFixed(4), curState||'', (bpm||0).toFixed(0) ]);
+  recNote.textContent = recRows.length+' rows · '+t.toFixed(0)+'s'; }
+function startRec(){ recording=true; recStart=performance.now(); recRows.length=0;
+  recBtn.textContent='■ Stop'; recBtn.style.color='#ef4444'; saveBtn.disabled=true; recNote.textContent='recording…';
+  recTimer=setInterval(recTick,100); }
+function stopRec(){ recording=false; clearInterval(recTimer); recBtn.textContent='● Record'; recBtn.style.color='';
+  saveBtn.disabled = recRows.length===0; recNote.textContent = recRows.length+' rows ready to save'; }
+function saveCsv(){ if(!recRows.length) return;
+  const esc=v=>/[",\n]/.test(v)?'"'+String(v).replace(/"/g,'""')+'"':v;
+  const lines=[REC_COLS.join(',')].concat(recRows.map(r=>r.map(esc).join(',')));
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+  const stamp=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+  a.href=url; a.download='neyeronstein_'+stamp+'.csv'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 500); }
+recBtn.addEventListener('click', ()=> recording?stopRec():startRec());
+saveBtn.addEventListener('click', saveCsv);
 tick();
 </script>
 </body>
