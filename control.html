@@ -54,7 +54,7 @@
     <button id="saveBtn" title="Save the recording as a CSV file" disabled>Save CSV</button><span id="recNote" style="font-size:11px;color:#7f8aa0;"></span>
     <span id="status">Not connected.</span>
     <div class="spacer"></div>
-    <div id="heart" title="Muse 2 heart rate"><span class="hh">♥</span><span id="bpm">--</span> bpm</div>
+    <div id="heart" title="Muse 2 PPG heart rate is unreliable on dry sensors — hidden" style="display:none"><span class="hh">♥</span><span id="bpm">--</span> bpm</div>
     <span style="font-size:11px;color:#7f8aa0;">drag node headers to move</span>
     <a class="link" href="./index.html" target="_blank" rel="noopener">Open Visualiser ▸</a>
   </div>
@@ -441,11 +441,13 @@ addEventListener('resize',drawWires);
 //  Muse or with Simulate. Columns: time, ISO clock, the five bands, FAA/Focus/Calm, state, bpm.
 const recBtn=document.getElementById('recBtn'), saveBtn=document.getElementById('saveBtn'), recNote=document.getElementById('recNote');
 let recording=false, recStart=0, recTimer=0; const recRows=[];
-const REC_COLS=['t_s','iso','Delta','Theta','Alpha','Beta','Gamma','FAA','TB','HRV','state','bpm'];
+// bpm (Muse PPG heart rate) is intentionally NOT logged — the dry-PPG estimate is unreliable and
+// would put bad data in the file. HRV here is a slow relative index, not a clinical measure.
+const REC_COLS=['t_s','iso','Delta','Theta','Alpha','Beta','Gamma','FAA','TB','HRV','state'];
 function recTick(){ if(!recording) return; const t=(performance.now()-recStart)/1000;
   recRows.push([ t.toFixed(2), new Date().toISOString(),
     (F.Delta||0).toFixed(4),(F.Theta||0).toFixed(4),(F.Alpha||0).toFixed(4),(F.Beta||0).toFixed(4),(F.Gamma||0).toFixed(4),
-    (F.FAA??0.5).toFixed(4),(F.TB??0.5).toFixed(4),(F.HRV??0.5).toFixed(4), curState||'', (bpm||0).toFixed(0) ]);
+    (F.FAA??0.5).toFixed(4),(F.TB??0.5).toFixed(4),(F.HRV??0.5).toFixed(4), curState||'' ]);
   recNote.textContent = recRows.length+' rows · '+t.toFixed(0)+'s'; }
 function startRec(){ recording=true; recStart=performance.now(); recRows.length=0;
   recBtn.textContent='■ Stop'; recBtn.style.color='#ef4444'; saveBtn.disabled=true; recNote.textContent='recording…';
