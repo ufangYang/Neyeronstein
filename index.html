@@ -98,6 +98,7 @@
       <button data-mode="sky">Sky</button>
       <button data-mode="veil">Veil</button>
       <button data-mode="tree" title="Made for the Longevity Rave · longevityrave.world">Longevity Rave</button>
+      <button data-mode="brain">Brain</button>
     </div>
     <span id="status">Waiting for Control…</span>
     <div class="spacer"></div>
@@ -155,6 +156,7 @@ bus.onmessage = (e) => { const m=e.data; if(!m||!m.f) return;
   if (m.map) route=m.map;
   if (m.state) curState=m.state;
   if (m.spec) specTarget=m.spec;
+  if (m.ch) chTarget=m.ch; if (m.conn) connTarget=m.conn;
   if (typeof m.aGain==='number') aGain=m.aGain;
   if (typeof m.aManual==='number') aManual=m.aManual;
   if (typeof m.rThresh==='number') rThresh=m.rThresh;
@@ -1209,6 +1211,151 @@ function drawTree(breath){
   ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
 }
 
+
+// ============================================================================
+//  BRAIN — a point-cloud brain (lateral view) with a network of threads, lit by
+//  the four electrodes WHERE THEY SIT. Control now broadcasts per-electrode
+//  relative band power (`ch`) and the 4x4 broadband correlation (`conn`).
+//  What is honest here and what is not:
+//   · Four sites: AF7/AF8 (forehead) and TP9/TP10 (behind the ears). Those four
+//     patches are the only places on this brain that carry measured data. Each
+//     patch glows with ITS electrode's relative alpha; a flat/noisy electrode
+//     greys its patch out instead of pretending.
+//   · The rest of the dots are texture. They shimmer with GLOBAL alpha: low alpha
+//     = independent twinkle, high alpha = one slow travelling wave (synchrony as
+//     a picture of the eyes-closed rhythm, not of "calm").
+//   · Threads between the four sites are weighted by broadband correlation of
+//     those channels. Volume conduction makes neighbouring dry electrodes
+//     correlate anyway, so this is "shared signal", not cortical connectivity.
+//   · Fine threads across the brain + sparks running along them scale with
+//     BETA. More engaged / talking / thinking = busier network. Decorative
+//     network, honest trend.
+//   · GAMMA sparkles at the temporal sites, because on a dry Muse gamma is
+//     mostly jaw and temporalis muscle. Clench and watch it.
+//   · THETA turns the outer ring of bokeh dots; DELTA breathes the whole brain.
+//   · FAA tints the frontal patches warm (left-leaning) or cool.
+// ============================================================================
+const BRAIN_OUTLINE=[[0.08,0.50],[0.10,0.38],[0.15,0.27],[0.24,0.16],[0.36,0.09],[0.50,0.06],[0.64,0.08],[0.77,0.14],[0.87,0.25],[0.93,0.38],
+  [0.94,0.50],[0.91,0.60],[0.85,0.68],[0.84,0.76],[0.78,0.84],[0.68,0.86],[0.60,0.82],[0.57,0.88],[0.56,0.98],[0.49,0.98],[0.49,0.88],
+  [0.44,0.80],[0.34,0.79],[0.24,0.75],[0.15,0.68],[0.09,0.60]];
+// electrode sites in the same normalised frame (lateral, frontal pole on the LEFT)
+const BRAIN_SITES=[ {n:'TP9', x:0.40,y:0.70, far:false}, {n:'AF7', x:0.17,y:0.34, far:false},
+                    {n:'AF8', x:0.23,y:0.28, far:true },  {n:'TP10',x:0.46,y:0.65, far:true } ];   // far = other hemisphere, drawn smaller
+let brain=null, brainKey='', brainT=0, brainSparks=[];
+let chTarget=null, chDisp=[0,1,2,3].map(()=>({Alpha:0.2,Theta:0.2,Beta:0.2,Gamma:0.1,Delta:0.3,q:'good'})), connDisp=[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]], connTarget=null;
+function inPoly(x,y,P){ let inside=false; for(let i=0,j=P.length-1;i<P.length;j=i++){ const xi=P[i][0],yi=P[i][1],xj=P[j][0],yj=P[j][1];
+  if(((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside; } return inside; }
+function buildBrain(w,h){
+  const rnd=treeRand(7331), m=Math.min(w,h), S=m*0.80, ox=w/2-S*0.5, oy=h/2-S*0.47;
+  const toPx=(x,y)=>[ox+x*S, oy+y*S];
+  const pts=[]; let guard=0;
+  while(pts.length<2600 && guard++<40000){
+    const x=rnd(), y=rnd(); if(!inPoly(x,y,BRAIN_OUTLINE)) continue;
+    // gyri: two bent sine fields; drop the troughs so the cloud folds instead of filling flat
+    const g=Math.sin(x*26+Math.sin(y*9)*2.2)*Math.cos(y*20+Math.sin(x*7)*2.0);
+    if(g<-0.25 && rnd()<0.85) continue;
+    const [px,py]=toPx(x,y);
+    const wgt=BRAIN_SITES.map(s=>Math.exp(-((x-s.x)**2+(y-s.y)**2)/(2*0.11*0.11))*(s.far?0.55:1));
+    pts.push({x:px,y:py,nx:x,ny:y,b0:0.35+rnd()*0.65,ph:rnd()*Math.PI*2,sz:0.6+rnd()*1.3,w:wgt,g:(g+1)/2});
+  }
+  // network nodes: a subset, each tied to its 3 nearest
+  const nodes=[]; for(let i=0;i<pts.length;i+=8) nodes.push(pts[i]);
+  const edges=[]; for(let i=0;i<nodes.length;i++){ const d=[]; for(let j=0;j<nodes.length;j++){ if(i===j) continue; d.push([Math.hypot(nodes[i].x-nodes[j].x,nodes[i].y-nodes[j].y),j]); }
+    d.sort((a,b)=>a[0]-b[0]); for(let k=0;k<3;k++){ if(d[k] && i<d[k][1]) edges.push([i,d[k][1]]); } }
+  const sites=BRAIN_SITES.map(s=>{ const [px,py]=toPx(s.x,s.y); return {...s,px,py}; });
+  // outer bokeh ring
+  const ring=[]; for(let i=0;i<260;i++){ const a=rnd()*Math.PI*2, r=0.56+rnd()*0.16, warm=rnd()<0.08;
+    ring.push({a,r,sp:(0.3+rnd()*0.7)*(rnd()<0.5?1:-1),sz:(1.5+rnd()*4)*(rnd()<0.2?2:1),warm,ph:rnd()*6.28,blur:rnd()}); }
+  return {pts,nodes,edges,sites,ring,cx:w/2,cy:h/2,m,S,ox,oy};
+}
+function drawBrain(breath){
+  const w=canvas.width,h=canvas.height,key=w+'x'+h;
+  if(!brain||brainKey!==key){ brain=buildBrain(w,h); brainKey=key; brainSparks=[]; }
+  const B=brain, m=B.m; brainT+=0.016;
+  // ease per-electrode + correlation data (fallback: everything follows the global bands)
+  for(let c=0;c<4;c++){ const t=chTarget&&chTarget[c]; const d=chDisp[c];
+    for(const k of ['Alpha','Theta','Beta','Gamma','Delta']){ const tv=t?t[k]:(F[k]||0)*0.5; d[k]+=(tv-d[k])*0.10; }
+    d.q=t?t.q:'good'; }
+  if(connTarget) for(let i=0;i<4;i++) for(let j=0;j<4;j++) connDisp[i][j]+=((connTarget[i]&&connTarget[i][j]||0)-connDisp[i][j])*0.10;
+  const a=Math.min(1, alphaSmooth*1.7), sync=a*a*(3-2*a);
+  const beta=Math.min(1,(F.Beta||0)*1.5), theta=Math.min(1,(F.Theta||0)*1.6), gamma=Math.min(1,(F.Gamma||0)*2), delta=Math.min(1,(F.Delta||0)*1.4);
+  const faa=((F.FAA??0.5)-0.5)*2;
+  const scale=1+0.025*Math.sin(breathPhase)*(0.5+delta);           // delta: how much the whole brain breathes
+
+  // 1 — ground
+  ctx.globalCompositeOperation='source-over';
+  const bg=ctx.createRadialGradient(w/2,h/2,0,w/2,h/2,Math.max(w,h)*0.75);
+  bg.addColorStop(0,`rgba(${10+a*6},${16+a*10},${34+a*14},1)`); bg.addColorStop(1,'rgba(3,5,12,1)');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,w,h);
+
+  // 2 — outer bokeh ring: theta turns it, delta breathes it
+  ctx.globalCompositeOperation='screen';
+  const rot=brainT*(0.04+theta*0.22);
+  for(const d of B.ring){ const ang=d.a+rot*d.sp, r=d.r*m*(1+0.03*Math.sin(breathPhase)*(0.5+delta));
+    const x=w/2+Math.cos(ang)*r, y=h/2+Math.sin(ang)*r*0.92, tw=0.5+0.5*Math.sin(brainT*1.3+d.ph);
+    const al=(0.10+tw*0.30)*(0.4+d.blur*0.6);
+    ctx.fillStyle=d.warm?`rgba(255,${150+tw*60},120,${al})`:`rgba(${90+tw*60},${200+tw*40},${230},${al})`;
+    ctx.beginPath(); ctx.arc(x,y,d.sz*(1+d.blur*1.2),0,Math.PI*2); ctx.fill(); }
+
+  ctx.save(); ctx.translate(w/2,h/2); ctx.scale(scale,scale); ctx.translate(-w/2,-h/2);
+
+  // 3 — soft body glow behind the cloud
+  { const g=ctx.createRadialGradient(B.cx,B.cy-m*0.02,m*0.05,B.cx,B.cy,m*0.42);
+    g.addColorStop(0,`rgba(90,80,200,${0.10+a*0.10})`); g.addColorStop(1,'rgba(0,0,0,0)'); ctx.fillStyle=g; ctx.fillRect(0,0,w,h); }
+
+  // 4 — site levels: each patch lit by its own electrode's relative alpha, greyed if the electrode is bad
+  const site=B.sites.map((s,i)=>{ const d=chDisp[i]; const bad=d.q==='flat'||d.q==='noisy';
+    const lv=bad?0:Math.min(1,Math.max(0,(d.Alpha-0.12)/0.35));               // relative alpha 0.12…0.47 → 0…1
+    return {lv,bad,frontal:s.n[0]==='A',temporal:s.n[0]==='T'}; });
+
+  // 5 — fine threads (beta) and sparks
+  const thr=0.07+beta*0.38;
+  ctx.lineWidth=Math.max(0.8,m*0.0009); ctx.strokeStyle=`rgba(130,225,255,${thr})`; ctx.beginPath();
+  for(const [i,j] of B.edges){ const p=B.nodes[i],q=B.nodes[j]; ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); } ctx.stroke();
+  if(Math.random()<0.03+beta*0.6 && brainSparks.length<160){ const e=B.edges[Math.floor(Math.random()*B.edges.length)]; brainSparks.push({e,t:0,v:0.012+Math.random()*0.02+beta*0.03}); }
+  for(const s of brainSparks){ s.t+=s.v; const p=B.nodes[s.e[0]],q=B.nodes[s.e[1]]; const x=p.x+(q.x-p.x)*s.t, y=p.y+(q.y-p.y)*s.t;
+    ctx.fillStyle=`rgba(190,240,255,${0.9*(1-Math.abs(s.t-0.5)*1.4)})`; ctx.beginPath(); ctx.arc(x,y,m*0.0022,0,Math.PI*2); ctx.fill(); }
+  brainSparks=brainSparks.filter(s=>s.t<1);
+
+  // 6 — site-to-site threads: broadband correlation between the actual channels
+  const IDX={TP9:0,AF7:1,AF8:2,TP10:3};
+  for(let i=0;i<4;i++) for(let j=i+1;j<4;j++){ const r=Math.abs(connDisp[IDX[B.sites[i].n]][IDX[B.sites[j].n]]); if(r<0.08) continue;
+    const p=B.sites[i],q=B.sites[j]; ctx.lineWidth=Math.max(0.8,m*0.0012*r*3); ctx.strokeStyle=`rgba(160,230,255,${0.08+r*0.45})`;
+    ctx.beginPath(); ctx.moveTo(p.px,p.py); const mx=(p.px+q.px)/2, my=(p.py+q.py)/2-m*0.06; ctx.quadraticCurveTo(mx,my,q.px,q.py); ctx.stroke(); }
+
+  // 7 — the cloud. Global alpha: twinkle → one travelling wave. Site patches add their own light.
+  const twk=1-sync;
+  for(const p of B.pts){
+    const wave=0.5+0.5*Math.sin(brainT*1.6 - p.nx*7 + p.ny*2.5);
+    const tw=0.5+0.5*Math.sin(brainT*2.4+p.ph*4);
+    let L=p.b0*(0.22+0.55*(wave*sync+tw*twk)) + (0.10*p.g);
+    let hue=236-p.ny*18, sat=70, lit=58;
+    for(let s=0;s<4;s++){ const k=p.w[s]; if(k<0.02) continue; const st=site[s];
+      if(st.bad){ sat-=k*55; L+=k*0.05; continue; }
+      L+=k*st.lv*0.95; lit+=k*st.lv*22;
+      if(st.frontal){ hue+=k*faa*-40; }                                    // warm for left-frontal lean
+      if(st.temporal){ L+=k*gamma*(0.4+0.6*Math.random()); hue-=k*gamma*60; } }  // gamma ≈ jaw → hot sparkle
+    L=Math.min(1,L);
+    ctx.fillStyle=`hsla(${hue},${sat}%,${Math.min(92,lit)}%,${0.15+L*0.80})`;
+    const r=p.sz*m*0.0016*(0.7+L*0.8); ctx.fillRect(p.x-r,p.y-r,r*2,r*2); }
+
+  // 8 — electrode markers: small labelled dots, dimmer for the far hemisphere
+  for(let i=0;i<4;i++){ const s=B.sites[i], st=site[i];
+    const g=ctx.createRadialGradient(s.px,s.py,0,s.px,s.py,m*(0.05+st.lv*0.07)*(s.far?0.7:1));
+    const col= st.bad?'120,120,130': st.frontal?(faa>0?'255,190,120':'150,200,255'):'140,255,220';
+    g.addColorStop(0,`rgba(${col},${(0.10+st.lv*0.35)*(s.far?0.6:1)})`); g.addColorStop(1,`rgba(${col},0)`);
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(s.px,s.py,m*0.13,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=st.bad?'rgba(150,150,160,0.8)':`rgba(${col},0.95)`; ctx.beginPath(); ctx.arc(s.px,s.py,m*(s.far?0.003:0.0045),0,Math.PI*2); ctx.fill();
+    if(!document.body.classList.contains('present')){ ctx.font=`${Math.max(9,m*0.013)}px system-ui`; ctx.fillStyle=`rgba(200,210,230,${s.far?0.45:0.75})`; ctx.textAlign='left';
+      ctx.fillText(s.n+(st.bad?' · '+chDisp[i].q:''), s.px+m*0.012, s.py-m*0.008); } }
+  ctx.restore();
+
+  // 9 — vignette
+  ctx.globalCompositeOperation='source-over';
+  const vg=ctx.createRadialGradient(w/2,h/2,Math.min(w,h)*0.3,w/2,h/2,Math.max(w,h)*0.8);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(2,4,10,0.55)'); ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
+}
+
 let mode='bloom'; const modeBox=document.getElementById('modes');
 modeBox.addEventListener('click', e => { const btn=e.target.closest('button'); if(!btn) return;
   mode=btn.dataset.mode; [...modeBox.children].forEach(c=>c.classList.toggle('on',c===btn));
@@ -1229,7 +1376,8 @@ const CAPTION={ bloom:'Calm (alpha) opens a warm bloom · thinking (beta) tighte
   chiffon:'Light curtains fly on alpha · beta spins the flow · colour runs gold→green→blue→purple→pale from the core out',
   sky:'Alpha widens the sky · close your eyes and the colour opens through the branches',
   veil:'Light through rippled glass · calm slows the smoke almost to rest',
-  tree:'Longevity Rave · close your eyes: alpha swells the bubbles and draws them into one breath · theta sets them floating · beta jitters' };
+  tree:'Longevity Rave · close your eyes: alpha swells the bubbles and draws them into one breath · theta sets them floating · beta jitters',
+  brain:'Four patches glow with their own electrode · alpha turns the twinkle into one wave · beta busies the threads · gamma at the temples is jaw' };
 
 // ============================================================================
 //  PUBLIC DEMONSTRATION
@@ -1254,6 +1402,13 @@ function demoStep(dt){
   Ftarget.Gamma = Math.max(0, 0.10 + Math.sin(demoT*0.71)*0.040);
   Ftarget.FAA   = 0.5 + Math.sin(demoT*0.13)*0.16;
   Ftarget.TB=0.5; Ftarget.HRV=0.5; Ftarget.LZ=0.5;
+  { const A=Ftarget.Alpha, ch=[]; const nm=['TP9','AF7','AF8','TP10'];
+    for(let c=0;c<4;c++){ const temporal=c===0||c===3, v=Math.sin(demoT*0.4+c*1.7)*0.04;
+      const al=Math.max(0.05, 0.14 + A*0.30*(temporal?1.0:0.6) + v);
+      ch.push({name:nm[c], q:'good', Alpha:al, Theta:0.20, Beta:0.25-A*0.08, Gamma:0.06, Delta:Math.max(0.05,1-al-0.51)}); }
+    chTarget=ch;
+    const r=(i,j)=>0.25+0.35*Math.max(0,Math.sin(demoT*0.21+i*1.3+j*0.7));
+    connTarget=[[1,r(0,1),r(0,2),r(0,3)],[r(0,1),1,0.6+0.2*Math.sin(demoT*0.3),r(1,3)],[r(0,2),0.6+0.2*Math.sin(demoT*0.3),1,r(2,3)],[r(0,3),r(1,3),r(2,3),1]]; }
   curState = closed>0.45 ? 'Relaxed' : (Ftarget.Beta>0.42 ? 'Focused' : 'Neutral');
   for(let k=0;k<49;k++){
     if(k<3){ specTarget[k]=0; continue; }
@@ -1296,6 +1451,7 @@ function tick(){
   else if(mode==='sky') drawSky(breath);                 // its own violet palette — no green alpha bloom
   else if(mode==='veil') drawVeil(breath);               // white caustic light — no green alpha bloom either
   else if(mode==='tree') drawTree(breath);               // Longevity Rave tree — own palette, own halo
+  else if(mode==='brain') drawBrain(breath);             // point-cloud brain lit per electrode
   const aPct=Math.min(100,alphaSmooth*140);
   alphaFill.style.width=aPct+'%';
   const closed=alphaSmooth>0.32;

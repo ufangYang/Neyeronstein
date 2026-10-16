@@ -420,7 +420,15 @@ setInterval(()=>{
   const specOut=new Array(49).fill(0);
   for(let k=3;k<=45;k++) specOut[k]=Math.min(1,(specSmooth[k]||0)/specAGC);
   const wavesOut={}; for(const k in waveAcc){ wavesOut[k]=waveAcc[k].slice(); waveAcc[k].length=0; }   // send & clear filtered samples
-  bus.postMessage({ f:F, bpm, pulse, state:curState, spec:specOut, aGain: ctrl.alphaSens/50, aManual: ctrl.bloomPreview/100, rThresh: ctrl.rThresh/100, waves: wavesOut, hpHz: ctrl.hpHz,
+  // Per-electrode relative band power + signal quality, and the 4x4 broadband correlation.
+  // The Brain visualiser lights each site with ITS OWN electrode, so what glows where is
+  // what that electrode measured, not an illustration. Relative power, so gain cancels.
+  let chOut=null, connOut=null;
+  if(filled>=N){ chOut=[];
+    for(let c=0;c<CH;c++){ const pw={}; let tot=0; for(const nm in BANDS){ const[lo,hi]=BANDS[nm]; pw[nm]=bandPow(chSpec[c],lo,hi); tot+=pw[nm]; }
+      const rms=chRms(c); const o={ name:CH_NAME[c], rms, q:qualOf(rms)[0] }; for(const nm in BANDS) o[nm]=tot>0?pw[nm]/tot:0; chOut.push(o); }
+    connOut=connMatrix(); }
+  bus.postMessage({ f:F, bpm, pulse, state:curState, spec:specOut, ch:chOut, conn:connOut, aGain: ctrl.alphaSens/50, aManual: ctrl.bloomPreview/100, rThresh: ctrl.rThresh/100, waves: wavesOut, hpHz: ctrl.hpHz,
   live: lastPacket>0 && performance.now()-lastPacket<600, map:route, story:'', base:baseMean }); }, 100);
 // silent keep-alive tone so the OS/browser doesn't heavily throttle this window's timers when it's
 // in the background — keeps the broadcast flowing to the Visualiser on the other screen.
