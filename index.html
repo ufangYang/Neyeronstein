@@ -1126,16 +1126,23 @@ function buildTree(w,h){
   bubbles.sort((a,b)=>b.r0-a.r0);          // big ones first, small ones drawn on top
   return {segs,tips,curls,bubbles,base,cx,cy,m};
 }
+let treeA=0;
+function treeKnob(name){ const k=route[name]; if(!k||k==='none') return 0; const v=(F[k]!==undefined?F[k]:Ftarget[k]); return typeof v==='number'?v:0; }
 function hexA(hex,a){ const n=parseInt(hex.slice(1),16); return `rgba(${n>>16},${(n>>8)&255},${n&255},${a})`; }
 function drawTree(breath){
   const w=canvas.width,h=canvas.height; const key=w+'x'+h;
   if(!tree||treeKey!==key){ tree=buildTree(w,h); treeKey=key; treeSeeds=[]; }
   const T=tree, m=T.m;
   treeT+=0.016;
-  const a=Math.min(1, alphaSmooth*1.7);                        // display gain, as in Sky
+  // Control page knobs: Routing picks the feature behind Bloom (swell), Ripple (float), Speed (jitter)
+  // and Warmth (tint); "Alpha → Bloom open" (aGain) sets how easily it swells; "Bloom preview" (aManual)
+  // overrides the swell by hand. Defaults reproduce Alpha / Theta / Beta / FAA.
+  treeA += (treeKnob('size') - treeA)*0.12;
+  let a=Math.min(1, treeA*1.7*aGain);                          // display gain, as in Sky, times Control's gain
+  if(aManual>0.001) a=aManual;                                 // manual preview overrides live
   const sync=a*a*(3-2*a);                                      // smoothstep: shared breath comes in late and clean
-  const theta=Math.min(1,(F.Theta||0)*1.6), beta=Math.min(1,(F.Beta||0)*1.5), gamma=Math.min(1,(F.Gamma||0)*2), delta=Math.min(1,(F.Delta||0)*1.4);
-  const faa=((F.FAA??0.5)-0.5)*2;                              // -1 cool … +1 warm
+  const theta=Math.min(1,treeKnob('ripple')*1.6), beta=Math.min(1,treeKnob('speed')*1.5), gamma=Math.min(1,(F.Gamma||0)*2), delta=Math.min(1,(F.Delta||0)*1.4);
+  const wk=route.warmth, faa= (wk&&wk!=='none') ? (treeKnob('warmth')-0.5)*2 : 0;   // -1 cool … +1 warm, none = neutral
 
   // 1 — ground: deep plum-charcoal, lifting slightly with alpha so the room brightens when eyes close
   const bg=ctx.createRadialGradient(w/2,h*0.42,0,w/2,h*0.42,Math.max(w,h)*0.8);
@@ -1151,8 +1158,8 @@ function drawTree(breath){
 
   // 3 — trunk glow (delta) then trunk + branches, burgundy as in the logo but lifted for a dark room
   ctx.globalCompositeOperation='screen';
-  { const g=ctx.createRadialGradient(T.base.x,h*0.75,0,T.base.x,h*0.75,m*(0.10+delta*0.16));
-    g.addColorStop(0,`rgba(170,60,80,${0.10+delta*0.18})`); g.addColorStop(1,'rgba(0,0,0,0)');
+  { const g=ctx.createRadialGradient(T.base.x,h*0.75,0,T.base.x,h*0.75,m*(0.10+delta*0.32));
+    g.addColorStop(0,`rgba(170,60,80,${0.08+delta*0.34})`); g.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=g; ctx.fillRect(0,0,w,h); }
   ctx.globalCompositeOperation='source-over';
   ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#6b2235';
@@ -1168,7 +1175,7 @@ function drawTree(breath){
 
   // 4 — the bubbles. Fixed count. Alpha: bigger, softer, one breath. Theta: float. Beta: jitter.
   ctx.globalCompositeOperation='source-over';
-  const sizeMul=0.82+a*0.58, floatAmp=m*(0.004+theta*0.030), jit=beta*m*0.004;
+  const sizeMul=0.82+a*0.58, floatAmp=m*(0.004+theta*0.030), jit=beta*m*0.009;
   for(const b of T.bubbles){
     const ph=breathPhase + b.off*(1-sync);                      // sync→1 collapses every clock into one
     const br=1+0.13*Math.sin(ph)*(0.6+a*0.6);
@@ -1177,7 +1184,7 @@ function drawTree(breath){
     const x=b.x+fx+jx, y=b.y+fy+jy, r=b.r0*sizeMul*br;
     if(b.ring){
       ctx.strokeStyle=hexA(b.col,0.55+beta*0.3+a*0.1);
-      ctx.lineWidth=Math.max(1,m*(0.0022+beta*0.0022));
+      ctx.lineWidth=Math.max(1,m*(0.0020+beta*0.0040));
       ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke();
       if(b.halo){ ctx.beginPath(); ctx.arc(x,y,r*0.62,0,Math.PI*2); ctx.stroke(); }
     }else{
@@ -1209,6 +1216,9 @@ function drawTree(breath){
   const vg=ctx.createRadialGradient(w/2,h*0.5,Math.min(w,h)*0.3,w/2,h*0.5,Math.max(w,h)*0.78);
   vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,`rgba(4,3,8,${0.5-a*0.15})`);
   ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
+  if(aManual>0.001){ ctx.fillStyle='rgba(255,200,90,0.6)'; ctx.font=`600 ${Math.round(m*0.022)}px system-ui,-apple-system,sans-serif`;
+    ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    ctx.fillText('PREVIEW · manual override, set Bloom preview to 0 for live', 18, h-18); }
 }
 
 
@@ -1376,7 +1386,7 @@ const CAPTION={ bloom:'Calm (alpha) opens a warm bloom · thinking (beta) tighte
   chiffon:'Light curtains fly on alpha · beta spins the flow · colour runs gold→green→blue→purple→pale from the core out',
   sky:'Alpha widens the sky · close your eyes and the colour opens through the branches',
   veil:'Light through rippled glass · calm slows the smoke almost to rest',
-  tree:'Longevity Rave · close your eyes: alpha swells the bubbles and draws them into one breath · theta sets them floating · beta jitters',
+  tree:'Longevity Rave · close your eyes: alpha swells the bubbles and draws them into one breath · theta sets them floating · beta jitters · gold flashes are jaw muscle (EMG), not brain',
   brain:'Four patches glow with their own electrode · alpha turns the twinkle into one wave · beta busies the threads · gamma at the temples is jaw' };
 
 // ============================================================================
