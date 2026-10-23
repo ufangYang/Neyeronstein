@@ -140,7 +140,7 @@
 const bus = new BroadcastChannel('musegaze');
 const BANDS = ['Delta','Theta','Alpha','Beta','Gamma'];
 const BAND_HUE = { Delta:265, Theta:217, Alpha:142, Beta:38, Gamma:0 };
-const F = { Delta:0,Theta:0,Alpha:0,Beta:0,Gamma:0, FAA:0.5, TB:0.5, HRV:0.5, LZ:0.5 };
+const F = { Delta:0,Theta:0,Alpha:0,Beta:0,Gamma:0, FAA:0.5, TB:0.5, HRV:0.5, LZ:0.5, PC1:0.5, PC2:0.5, SE:0.5 };
 const Ftarget = { ...F };
 let bpm=0, pulse=0, lastRx=-1e9, curState='Neutral', aGain=1, aManual=0, rThresh=0.65;  // rThresh: alpha level needed to earn the rainbow
 let specTarget=new Array(49).fill(0), specDisp=new Array(49).fill(0);
@@ -1078,127 +1078,179 @@ function drawSky(breath){
 
 
 // ============================================================================
-//  TREE — for the Longevity Rave (Oxford). The event's tree of bubbles, alive.
-//  Trunk and branches are fixed. The canopy is a FIXED set of translucent discs
-//  and rings in the logo palette; their number never changes, only how they
-//  behave. ALPHA (eyes closed, resting) swells them, softens them and pulls them
-//  into ONE shared breath; low alpha = small, hard, each on its own clock.
-//  THETA lets the bubbles float further from the branches and releases seeds.
-//  BETA adds jitter and hardens the rings. GAMMA (≈ jaw EMG) flashes the gold.
-//  FAA tints the canopy warm (left-lean) or cool. DELTA widens the trunk glow.
+//  TREE, for the Longevity Rave (Oxford). Built after the event logo: a burgundy
+//  trunk with spiral tendrils and a round crown of glassy spheres, thick rings and
+//  small "eye" bubbles, filled right down to the fork.
+//  What the brain does to it (each one is a Routing row on the Control page):
+//   Bloom  (default Alpha) : bubbles GROW, soften, breathe as one, and NEW bubbles
+//                            appear until the crown is complete at the Rainbow threshold.
+//   Speed  (default Beta)  : bubbles JITTER and the rings harden.
+//   Ripple (default Theta) : bubbles float upward and seed rings rise.
+//   Warmth (default FAA)   : the crown tints warm or cool.
+//   Glow   (default Delta) : the trunk glow widens.
+//   Gamma flashes the gold spheres (mostly jaw muscle on this headset).
 // ============================================================================
-const TREE_PAL=[ // fill, weight — logo colours
-  ['#1b8290',3],['#f2b61c',3],['#3aa64a',2],['#a3cf3a',2],['#a81c6b',2],['#1f5aa8',2],['#e37a1c',1],['#1f6f7a',1],['#c22a4a',1]];
-const TREE_RING=['#2f8f3f','#e0a51a','#b0205f','#17707c','#7fb93a'];
-let tree=null, treeKey='', treeT=0, treeSeeds=[];
+const TREE_PAL=[ // sphere colours from the logo, with weights
+  ['#2a9aa6',3],['#f2b024',3],['#a4c63c',2],['#3aa64a',2],['#b0287a',2],['#2a6db5',2],['#e07b26',1],['#1d6f7a',1],['#c0263f',1]];
+const TREE_RING=['#4a9a3e','#e0a51a','#c02a6a','#2f6b2f','#d8752a','#a4c63c'];
+const TREE_GOLD=new Set(['#f2b024','#e07b26']);
+let tree=null, treeKey='', treeT=0, treeSeeds=[], treeA=0;
 function treeRand(seed){ let s=seed>>>0; return ()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
-function buildTree(w,h){
-  const rnd=treeRand(20261016), m=Math.min(w,h);
-  const base={x:w*0.5, y:h*0.95}, segs=[], tips=[], curls=[];
-  function branch(x,y,ang,len,wid,depth){
-    const x2=x+Math.cos(ang)*len, y2=y+Math.sin(ang)*len;
-    const bend=(rnd()-0.5)*len*0.35;
-    const qx=(x+x2)/2+Math.cos(ang+Math.PI/2)*bend, qy=(y+y2)/2+Math.sin(ang+Math.PI/2)*bend;
-    segs.push({x1:x,y1:y,qx,qy,x2,y2,w:wid,d:depth});
-    if(depth>=6||len<m*0.02){ tips.push({x:x2,y:y2,d:depth});
-      if(rnd()<0.5) curls.push({x:x2,y:y2,r:m*(0.012+rnd()*0.014),dir:rnd()<0.5?1:-1,a0:ang}); return; }
-    const n= depth<2 ? 2 : (rnd()<0.6?2:3);
-    for(let i=0;i<n;i++){
-      const spread=0.70+rnd()*0.5, s=(i-(n-1)/2)*spread+(rnd()-0.5)*0.30;
-      branch(x2,y2, ang+s-(depth===0?0.0:0), len*(0.62+rnd()*0.14), wid*0.62, depth+1);
-    }
-  }
-  branch(base.x,base.y,-Math.PI/2+0.06, m*0.22, m*0.026, 0);
-  // canopy bubbles: anchored around branch tips and the upper trunk, biased into an ellipse
-  let cx=0,cy=0; for(const t of tips){ cx+=t.x; cy+=t.y; } cx/=tips.length; cy/=tips.length;
-  const bubbles=[]; const N=130;
-  for(let i=0;i<N;i++){
-    const t=tips[Math.floor(rnd()*tips.length)];
-    const x=t.x+(rnd()-0.5)*m*0.12, y=t.y+(rnd()-0.5)*m*0.12;
-    const big=rnd()<0.13, mid=rnd()<0.45;
-    const r0=m*(big?0.048+rnd()*0.030 : mid?0.020+rnd()*0.020 : 0.008+rnd()*0.012);
-    const pick=(()=>{ const tot=TREE_PAL.reduce((s,p)=>s+p[1],0); let v=rnd()*tot; for(const p of TREE_PAL){ v-=p[1]; if(v<=0) return p[0]; } return TREE_PAL[0][0]; })();
-    const ring=!big && rnd()<0.42;
-    bubbles.push({x,y,r0,col:ring?TREE_RING[Math.floor(rnd()*TREE_RING.length)]:pick, ring,
-      gold: pick==='#f2b61c'||pick==='#e37a1c', off:rnd()*Math.PI*2, seed:rnd()*100, jx:rnd()*7, jy:rnd()*7,
-      halo: !ring && rnd()<0.5 });
-  }
-  bubbles.sort((a,b)=>b.r0-a.r0);          // big ones first, small ones drawn on top
-  return {segs,tips,curls,bubbles,base,cx,cy,m};
-}
-let treeA=0;
 function treeKnob(name){ const k=route[name]; if(!k||k==='none') return 0; const v=(F[k]!==undefined?F[k]:Ftarget[k]); return typeof v==='number'?v:0; }
 function hexA(hex,a){ const n=parseInt(hex.slice(1),16); return `rgba(${n>>16},${(n>>8)&255},${n&255},${a})`; }
+function hexLight(hex,k,a){ const n=parseInt(hex.slice(1),16); const r=n>>16,g=(n>>8)&255,b=n&255;
+  return `rgba(${Math.round(r+(255-r)*k)},${Math.round(g+(255-g)*k)},${Math.round(b+(255-b)*k)},${a})`; }
+function buildTree(w,h){
+  const rnd=treeRand(20261016), m=Math.min(w,h);
+  const C={x:w*0.5, y:h*0.45}, rx=m*0.52, ry=m*0.30;              // the crown: a wide round dome
+  const base={x:w*0.5-m*0.01, y:h*0.985}, fork={x:w*0.5, y:h*0.73};
+  const segs=[], tips=[], curls=[];
+  function branch(x,y,ang,len,wid,depth){
+    const x2=x+Math.cos(ang)*len, y2=y+Math.sin(ang)*len;
+    const bend=(rnd()-0.5)*len*0.40;
+    const qx=(x+x2)/2+Math.cos(ang+Math.PI/2)*bend, qy=(y+y2)/2+Math.sin(ang+Math.PI/2)*bend;
+    segs.push({x1:x,y1:y,qx,qy,x2,y2,w:wid,d:depth});
+    if(depth>=3||len<m*0.04){ tips.push({x:x2,y:y2});
+      if(rnd()<0.55) curls.push({x:x2,y:y2,r:m*(0.010+rnd()*0.012),dir:rnd()<0.5?1:-1,a0:ang}); return; }
+    const n=rnd()<0.75?2:3;
+    for(let i=0;i<n;i++){ const s=(i-(n-1)/2)*(0.55+rnd()*0.35)+(rnd()-0.5)*0.25;
+      branch(x2,y2, ang+s, len*(0.66+rnd()*0.12), wid*0.64, depth+1); }
+  }
+  // three limbs from a low fork, like the logo
+  branch(fork.x,fork.y,-Math.PI/2-0.66, m*0.20, m*0.022, 1);
+  branch(fork.x,fork.y,-Math.PI/2+0.06, m*0.17, m*0.018, 1);
+  branch(fork.x,fork.y,-Math.PI/2+0.70, m*0.20, m*0.022, 1);
+  // a few tendrils hanging below the crown on the lower limbs
+  for(const sg of segs) if(sg.d<=2 && rnd()<0.5){ const t=0.6, u=1-t;
+    curls.push({x:u*u*sg.x1+2*u*t*sg.qx+t*t*sg.x2, y:u*u*sg.y1+2*u*t*sg.qy+t*t*sg.y2+m*0.02, r:m*(0.010+rnd()*0.010), dir:rnd()<0.5?1:-1, a0:Math.PI/2}); }
+
+  // bubbles: placed by size class, large first, so the hierarchy reads and the middle is filled.
+  // "core" bubbles are always there; the others appear as Bloom (alpha) rises.
+  const bubbles=[], solids=[];
+  const pickCol=()=>{ const tot=TREE_PAL.reduce((s,p)=>s+p[1],0); let v=rnd()*tot; for(const p of TREE_PAL){ v-=p[1]; if(v<=0) return p[0]; } return TREE_PAL[0][0]; };
+  const ringCol=()=>TREE_RING[Math.floor(rnd()*TREE_RING.length)];
+  function inCrown(r){ const th=rnd()*Math.PI*2, lump=1+0.07*Math.sin(5*th+1.3);
+    const rho=Math.sqrt(rnd())*Math.max(0, 1 - r/ry*0.9);
+    return { x:C.x+Math.cos(th)*rx*rho*lump, y:C.y+Math.sin(th)*ry*rho*lump }; }
+  function add(kind,count,rlo,rhi,coreP,sw){
+    for(let i=0;i<count;i++){ const r0=m*(rlo+rnd()*(rhi-rlo)); let p=null;
+      for(let tries=0;tries<40;tries++){ const q=inCrown(r0);
+        if(kind!=='disc'||r0<m*0.02){ p=q; break; }
+        let ok=true; for(const s of solids){ if(Math.hypot(q.x-s.x,q.y-s.y)<0.62*(r0+s.r)){ ok=false; break; } }
+        if(ok){ p=q; break; } }
+      if(!p) p=inCrown(r0);
+      const col= kind==='ring'||kind==='dotring' ? ringCol() : pickCol();
+      const b={kind,x:p.x,y:p.y,r0,col,ring2:ringCol(),sw:m*sw,gold:TREE_GOLD.has(col),
+        ap: rnd()<coreP ? 0 : 0.08+rnd()*0.92, vis:0, off:rnd()*Math.PI*2, seed:rnd()*100, jx:rnd()*7, jy:rnd()*7};
+      b.vis = b.ap===0 ? 1 : 0;
+      bubbles.push(b); if(kind==='disc'&&r0>=m*0.02) solids.push({x:p.x,y:p.y,r:r0}); } }
+  add('disc',   10, 0.052,0.072, 1.0, 0);
+  add('ring',    7, 0.060,0.090, 1.0, 0.0075);
+  add('disc',   22, 0.028,0.042, 0.6, 0);
+  add('ring',   14, 0.028,0.048, 0.5, 0.005);
+  add('eye',    18, 0.014,0.024, 0.3, 0.0035);
+  add('dotring',16, 0.012,0.022, 0.3, 0.003);
+  add('disc',   14, 0.010,0.018, 0.3, 0);
+  // bubbles strung along the limbs below the crown's centre
+  { const low=segs.filter(sg=>Math.min(sg.y1,sg.y2)>C.y-ry*0.2);
+    for(let i=0;i<25 && low.length;i++){ const sg=low[Math.floor(rnd()*low.length)], t=0.2+rnd()*0.7, u=1-t;
+      const px=u*u*sg.x1+2*u*t*sg.qx+t*t*sg.x2, py=u*u*sg.y1+2*u*t*sg.qy+t*t*sg.y2;
+      const ang=Math.atan2(sg.y2-sg.y1,sg.x2-sg.x1)+Math.PI/2, side=(rnd()<0.5?-1:1)*m*(0.006+rnd()*0.018);
+      const kinds=['eye','dotring','disc','ring'], kind=kinds[Math.floor(rnd()*4)];
+      const col= kind==='ring'||kind==='dotring' ? ringCol() : pickCol();
+      const b={kind,x:px+Math.cos(ang)*side,y:py+Math.sin(ang)*side,r0:m*(0.008+rnd()*0.014),col,ring2:ringCol(),
+        sw:m*0.003,gold:TREE_GOLD.has(col),ap: rnd()<0.4?0:0.08+rnd()*0.92,vis:0,off:rnd()*Math.PI*2,seed:rnd()*100,jx:rnd()*7,jy:rnd()*7};
+      b.vis = b.ap===0 ? 1 : 0; bubbles.push(b); } }
+  bubbles.sort((a,b)=>b.r0-a.r0);          // big ones first, small ones drawn on top
+  return {segs,tips,curls,bubbles,base,fork,C,rx,ry,m};
+}
 function drawTree(breath){
   const w=canvas.width,h=canvas.height; const key=w+'x'+h;
   if(!tree||treeKey!==key){ tree=buildTree(w,h); treeKey=key; treeSeeds=[]; }
   const T=tree, m=T.m;
   treeT+=0.016;
-  // Control page knobs: Routing picks the feature behind Bloom (swell), Ripple (float), Speed (jitter)
-  // and Warmth (tint); "Alpha → Bloom open" (aGain) sets how easily it swells; "Bloom preview" (aManual)
-  // overrides the swell by hand. Defaults reproduce Alpha / Theta / Beta / FAA.
+  // Control page knobs. Bloom route = grow + appear, gained by "Alpha → Bloom open" (aGain),
+  // overridden by "Bloom preview" (aManual). Rainbow threshold = Bloom level that completes the crown.
   treeA += (treeKnob('size') - treeA)*0.12;
-  let a=Math.min(1, treeA*1.7*aGain);                          // display gain, as in Sky, times Control's gain
-  if(aManual>0.001) a=aManual;                                 // manual preview overrides live
-  const sync=a*a*(3-2*a);                                      // smoothstep: shared breath comes in late and clean
-  const theta=Math.min(1,treeKnob('ripple')*1.6), beta=Math.min(1,treeKnob('speed')*1.5), gamma=Math.min(1,(F.Gamma||0)*2), delta=Math.min(1,(F.Delta||0)*1.4);
-  const wk=route.warmth, faa= (wk&&wk!=='none') ? (treeKnob('warmth')-0.5)*2 : 0;   // -1 cool … +1 warm, none = neutral
+  let a=Math.min(1, treeA*1.7*aGain);
+  if(aManual>0.001) a=aManual;
+  const sync=a*a*(3-2*a);                                      // shared breath comes in late and clean
+  const appFrac=Math.min(1, a/Math.max(0.05,rThresh));         // share of the extra bubbles that are out
+  const theta=Math.min(1,treeKnob('ripple')*1.6), beta=Math.min(1,treeKnob('speed')*1.5);
+  const gamma=Math.min(1,(F.Gamma||0)*2), glow=Math.min(1,treeKnob('glow')*1.4);
+  const wk=route.warmth, faa=(wk&&wk!=='none') ? (treeKnob('warmth')-0.5)*2 : 0;
 
-  // 1 — ground: deep plum-charcoal, lifting slightly with alpha so the room brightens when eyes close
+  // 1 ground: deep plum, lifting a little as Bloom rises
   const bg=ctx.createRadialGradient(w/2,h*0.42,0,w/2,h*0.42,Math.max(w,h)*0.8);
   bg.addColorStop(0,`rgba(${22+a*10},${18+a*8},${30+a*8},1)`); bg.addColorStop(1,'rgba(7,6,11,1)');
   ctx.globalCompositeOperation='source-over'; ctx.fillStyle=bg; ctx.fillRect(0,0,w,h);
 
-  // 2 — canopy halo: the eyes-closed tell. Green-gold glow behind the whole crown.
+  // 2 crown halo, the eyes-closed tell
   if(a>0.04){ ctx.globalCompositeOperation='screen';
-    const r=m*(0.30+a*0.30)*(0.95+breath*0.08);
-    const g=ctx.createRadialGradient(T.cx,T.cy,0,T.cx,T.cy,r);
-    g.addColorStop(0,`rgba(120,200,110,${0.05+a*0.22})`); g.addColorStop(0.6,`rgba(230,180,60,${0.02+a*0.08})`); g.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(T.cx,T.cy,r,0,Math.PI*2); ctx.fill(); }
+    const r=Math.max(T.rx,T.ry)*(0.75+a*0.45)*(0.95+breath*0.08);
+    const g=ctx.createRadialGradient(T.C.x,T.C.y,0,T.C.x,T.C.y,r);
+    g.addColorStop(0,`rgba(120,200,110,${0.04+a*0.20})`); g.addColorStop(0.6,`rgba(230,180,60,${0.02+a*0.07})`); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(T.C.x,T.C.y,r,0,Math.PI*2); ctx.fill(); }
 
-  // 3 — trunk glow (delta) then trunk + branches, burgundy as in the logo but lifted for a dark room
+  // 3 trunk glow (Glow route, default Delta)
   ctx.globalCompositeOperation='screen';
-  { const g=ctx.createRadialGradient(T.base.x,h*0.75,0,T.base.x,h*0.75,m*(0.10+delta*0.32));
-    g.addColorStop(0,`rgba(170,60,80,${0.08+delta*0.34})`); g.addColorStop(1,'rgba(0,0,0,0)');
+  { const g=ctx.createRadialGradient(T.base.x,h*0.80,0,T.base.x,h*0.80,m*(0.08+glow*0.30));
+    g.addColorStop(0,`rgba(190,70,90,${0.06+glow*0.36})`); g.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=g; ctx.fillRect(0,0,w,h); }
   ctx.globalCompositeOperation='source-over';
-  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#6b2235';
-  const sway=Math.sin(treeT*0.6)*m*0.004*(0.5+beta);
-  for(const s of T.segs){ const k=s.d/6;
-    ctx.lineWidth=Math.max(1.2,s.w); ctx.beginPath(); ctx.moveTo(s.x1+sway*k*k,s.y1);
+
+  // 4 trunk: one tapered shape that flares at the foot, then limbs and tendrils
+  const TR='#6a2632', sway=Math.sin(treeT*0.6)*m*0.003*(0.5+beta);
+  ctx.fillStyle=TR; ctx.beginPath();
+  const bw=m*0.045, fw=m*0.017;
+  ctx.moveTo(T.base.x-bw,T.base.y);
+  ctx.quadraticCurveTo(T.base.x-fw*0.9,T.base.y-m*0.06, T.fork.x-fw,T.fork.y);
+  ctx.lineTo(T.fork.x+fw,T.fork.y);
+  ctx.quadraticCurveTo(T.base.x+fw*0.9,T.base.y-m*0.06, T.base.x+bw,T.base.y);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle=TR; ctx.lineCap='round'; ctx.lineJoin='round';
+  for(const s of T.segs){ const k=s.d/3;
+    ctx.lineWidth=Math.max(1.2,s.w); ctx.beginPath(); ctx.moveTo(s.x1+sway*k*k*0.5,s.y1);
     ctx.quadraticCurveTo(s.qx+sway*k*k,s.qy,s.x2+sway*k,s.y2); ctx.stroke(); }
-  ctx.lineWidth=Math.max(1,m*0.0025);
+  ctx.lineWidth=Math.max(1.2,m*0.0032);
   for(const c of T.curls){ ctx.beginPath();
-    for(let i=0;i<=40;i++){ const t=i/40, ang=c.a0+c.dir*t*Math.PI*2.6, r=c.r*(1-t*0.85);
+    for(let i=0;i<=44;i++){ const t=i/44, ang=c.a0+c.dir*t*Math.PI*2.8, r=c.r*(1-t*0.85);
       const x=c.x+Math.cos(ang)*r*t*2+sway*0.9, y=c.y+Math.sin(ang)*r*t*2; i?ctx.lineTo(x,y):ctx.moveTo(x,y); }
     ctx.stroke(); }
 
-  // 4 — the bubbles. Fixed count. Alpha: bigger, softer, one breath. Theta: float. Beta: jitter.
-  ctx.globalCompositeOperation='source-over';
-  const sizeMul=0.82+a*0.58, floatAmp=m*(0.004+theta*0.030), jit=beta*m*0.009;
+  // 5 bubbles. Bloom: grow, soften, breathe as one, and more of them appear.
+  //   Speed: jitter and harder rings. Ripple: float upward. A little hysteresis keeps a noisy
+  //   signal from making bubbles blink in and out.
+  const sizeMul=0.92+a*0.40, floatAmp=m*(0.002+theta*0.026), jit=beta*m*0.010;
+  const soft=a*0.45;                                          // edges soften a little, spheres stay crisp like the logo
   for(const b of T.bubbles){
-    const ph=breathPhase + b.off*(1-sync);                      // sync→1 collapses every clock into one
-    const br=1+0.13*Math.sin(ph)*(0.6+a*0.6);
+    if(b.ap>0){ const on = b.vis>0.5 ? b.ap<appFrac+0.04 : b.ap<appFrac-0.04;
+      b.vis += ((on?1:0) - b.vis)*0.06; }
+    if(b.vis<0.02) continue;
+    const ph=breathPhase + b.off*(1-sync);
+    const br=1+0.10*Math.sin(ph)*(0.5+a*0.7);
     const fx=Math.sin(treeT*0.35+b.seed)*floatAmp, fy=-Math.abs(Math.sin(treeT*0.23+b.seed*1.7))*floatAmp*1.6;
     const jx=Math.sin(treeT*9.1+b.jx)*jit, jy=Math.cos(treeT*11.3+b.jy)*jit;
-    const x=b.x+fx+jx, y=b.y+fy+jy, r=b.r0*sizeMul*br;
-    if(b.ring){
-      ctx.strokeStyle=hexA(b.col,0.55+beta*0.3+a*0.1);
-      ctx.lineWidth=Math.max(1,m*(0.0020+beta*0.0040));
-      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke();
-      if(b.halo){ ctx.beginPath(); ctx.arc(x,y,r*0.62,0,Math.PI*2); ctx.stroke(); }
-    }else{
-      const lift=b.gold?gamma*0.5:0;
-      const al=Math.min(0.85,0.42+a*0.22+lift), soft=0.60+a*0.30; // alpha opens the edge: harder when low, misty when high
-      const g=ctx.createRadialGradient(x-r*0.22,y-r*0.22,r*0.05,x,y,r);
-      g.addColorStop(0,hexA(b.col,al)); g.addColorStop(soft,hexA(b.col,al*0.82)); g.addColorStop(1,hexA(b.col,(1-a)*0.45+0.02));
+    const x=b.x+fx+jx, y=b.y+fy+jy, r=b.r0*sizeMul*br*(0.35+0.65*b.vis), v=b.vis;
+    const lift=b.gold?gamma*0.5:0;
+    if(b.kind==='disc' || b.kind==='eye'){
+      const al=Math.min(0.95,(0.82-soft*0.12+lift)*v);
+      const g=ctx.createRadialGradient(x-r*0.25,y-r*0.28,r*0.04,x,y,r);
+      g.addColorStop(0,hexLight(b.col,0.38+lift*0.4,al)); g.addColorStop(0.72-soft*0.25,hexA(b.col,al)); g.addColorStop(1,hexA(b.col,al*(1-soft*0.9)));
       ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
-      if(b.halo){ ctx.strokeStyle=hexA(b.col,0.35+a*0.25); ctx.lineWidth=Math.max(1,m*0.0018);
-        ctx.beginPath(); ctx.arc(x,y,r*1.22,0,Math.PI*2); ctx.stroke(); }
+      if(lift>0.05){ ctx.globalCompositeOperation='screen';               // Gamma: gold spheres flash
+        const fg=ctx.createRadialGradient(x,y,r*0.6,x,y,r*1.6); fg.addColorStop(0,`rgba(255,225,120,${lift*1.2*v})`); fg.addColorStop(1,'rgba(255,200,80,0)');
+        ctx.fillStyle=fg; ctx.beginPath(); ctx.arc(x,y,r*1.6,0,Math.PI*2); ctx.fill(); ctx.globalCompositeOperation='source-over'; }
+      if(b.kind==='eye'){ ctx.strokeStyle=hexA(b.ring2,(0.85-soft*0.15)*v); ctx.lineWidth=Math.max(1,b.sw*(1+beta*0.8));
+        ctx.beginPath(); ctx.arc(x,y,r*1.45,0,Math.PI*2); ctx.stroke(); }
+    }else{
+      ctx.strokeStyle=hexA(b.col,(0.86-soft*0.14)*v); ctx.lineWidth=Math.max(1,b.sw*(1+beta*0.9));
+      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke();
+      if(b.kind==='dotring'){ ctx.fillStyle=hexA(b.col,0.85*v); ctx.beginPath(); ctx.arc(x,y,r*0.28,0,Math.PI*2); ctx.fill(); }
     }
   }
 
-  // 5 — theta seeds: small bubbles let go of the crown and rise, more of them the more theta
+  // 6 Ripple seeds: small rings let go of the crown and rise, more of them the higher it is
   if(theta>0.25 && Math.random()<theta*0.08 && treeSeeds.length<40){
     const b=T.bubbles[Math.floor(Math.random()*T.bubbles.length)];
     treeSeeds.push({x:b.x,y:b.y,r:m*(0.004+Math.random()*0.006),col:b.col,vy:-m*(0.0006+Math.random()*0.0008),s:Math.random()*10,life:1}); }
@@ -1206,12 +1258,12 @@ function drawTree(breath){
     ctx.strokeStyle=hexA(s.col,Math.max(0,s.life)*0.7); ctx.lineWidth=1; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.stroke(); }
   treeSeeds=treeSeeds.filter(s=>s.life>0 && s.y>-20);
 
-  // 6 — FAA tint over the crown: warm amber for approach (left-frontal), cool teal otherwise
-  if(Math.abs(faa)>0.05){ const g=ctx.createRadialGradient(T.cx,T.cy,0,T.cx,T.cy,m*0.5);
-    const c= faa>0 ? `rgba(255,170,60,${Math.abs(faa)*0.10})` : `rgba(60,170,220,${Math.abs(faa)*0.10})`;
+  // 7 Warmth tint over the crown
+  if(Math.abs(faa)>0.05){ const g=ctx.createRadialGradient(T.C.x,T.C.y,0,T.C.x,T.C.y,m*0.55);
+    const c= faa>0 ? `rgba(255,170,60,${Math.abs(faa)*0.14})` : `rgba(60,170,220,${Math.abs(faa)*0.14})`;
     g.addColorStop(0,c); g.addColorStop(1,'rgba(0,0,0,0)'); ctx.fillStyle=g; ctx.fillRect(0,0,w,h); }
 
-  // 7 — vignette
+  // 8 vignette
   ctx.globalCompositeOperation='source-over';
   const vg=ctx.createRadialGradient(w/2,h*0.5,Math.min(w,h)*0.3,w/2,h*0.5,Math.max(w,h)*0.78);
   vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,`rgba(4,3,8,${0.5-a*0.15})`);
@@ -1386,7 +1438,7 @@ const CAPTION={ bloom:'Calm (alpha) opens a warm bloom · thinking (beta) tighte
   chiffon:'Light curtains fly on alpha · beta spins the flow · colour runs gold→green→blue→purple→pale from the core out',
   sky:'Alpha widens the sky · close your eyes and the colour opens through the branches',
   veil:'Light through rippled glass · calm slows the smoke almost to rest',
-  tree:'Longevity Rave · close your eyes: alpha swells the bubbles and draws them into one breath · theta sets them floating · beta jitters · gold flashes are jaw muscle (EMG), not brain',
+  tree:'Longevity Rave · close your eyes: alpha grows the bubbles, fills the crown and draws them into one breath · beta makes them jitter · theta sets them floating · gold flashes are jaw muscle (EMG), not brain',
   brain:'Four patches glow with their own electrode · alpha turns the twinkle into one wave · beta busies the threads · gamma at the temples is jaw' };
 
 // ============================================================================

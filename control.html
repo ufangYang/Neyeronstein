@@ -76,7 +76,7 @@ const BANDS = { Delta:[1,4], Theta:[4,8], Alpha:[8,13], Beta:[13,30], Gamma:[30,
 const BAND_COLORS = { Delta:'#8b5cf6', Theta:'#3b82f6', Alpha:'#22c55e', Beta:'#f59e0b', Gamma:'#ef4444' };
 const CH_COL = ['#8b5cf6','#3b82f6','#22c55e','#f59e0b'];
 const CH_NAME = ['TP9','AF7','AF8','TP10'];
-const ctrl = { avgChannels:true, plotCh:1, smooth:0.15, sens:45, alphaSens:50, bloomPreview:0, rThresh:65, hpHz:1, mains:60 };  // mains: line-noise notch (50/60 Hz)
+const ctrl = { avgChannels:true, plotCh:1, smooth:0.08, sens:30, alphaSens:50, bloomPreview:0, rThresh:65, hpHz:1, mains:50 };  // defaults tuned for a noisy room (EU mains, steadier, less twitchy)  // mains: line-noise notch (50/60 Hz)
 const useBand = { Delta:true, Theta:true, Alpha:true, Beta:true, Gamma:true };
 
 const buffers = Array.from({length:CH},()=>new Float32Array(N));
@@ -123,7 +123,7 @@ function computeAll(){
   for(let k=0;k<N/2;k++) specSmooth[k]+=(avg[k]-specSmooth[k])*0.3;
   if(ctrl.mains){ for(const h of [1,2]){ const b=Math.round(ctrl.mains*h);      // notch mains hum + 1st harmonic (1 Hz/bin)
     if(b>2 && b<N/2-2){ specSmooth[b]=(specSmooth[b-2]+specSmooth[b+2])/2; specSmooth[b-1]=(specSmooth[b-2]+specSmooth[b])/2; specSmooth[b+1]=(specSmooth[b]+specSmooth[b+2])/2; } } }
-  const power={}; for(const nm in BANDS){const[lo,hi]=BANDS[nm]; power[nm]=bandPow(specSmooth,lo,hi);}
+  const power={}; for(const nm in BANDS){const[lo,hi]=BANDS[nm]; power[nm]=bandPow(specSmooth,Math.max(lo,ctrl.hpHz),hi);}   // high-pass also applies to the bands
   let total=0; for(const k in BANDS) total+=power[k]; if(total<=0) return null;
   const rel={}; for(const k in BANDS) rel[k]=power[k]/total;
   const aAF7=bandPow(chSpec[1],8,13)+1e-9, aAF8=bandPow(chSpec[2],8,13)+1e-9;
@@ -233,31 +233,32 @@ mkNode('muse','Muse · raw EEG','#22c55e',30,86,[],['s'],
   `<canvas id="cRaw" width="188" height="86"></canvas><div style="margin-top:4px;color:#7f8aa0;" id="museState">idle</div>`);
 mkNode('chan','Channel','#3b82f6',260,86,['s'],['s'],
   `<select id="chSel"><option value="avg">Average (all 4)</option><option value="0">TP9 · left ear</option><option value="1">AF7 · left brow</option><option value="2">AF8 · right brow</option><option value="3">TP10 · right ear</option></select>
-   <div style="margin-top:6px;color:#7f8aa0;">Smooth</div><input id="smoothSl" type="range" min="0.02" max="0.5" step="0.01" value="0.15" style="width:100%">`);
+   <div style="margin-top:6px;color:#7f8aa0;">Smooth</div><input id="smoothSl" type="range" min="0.02" max="0.5" step="0.01" value="0.08" style="width:100%">`);
 mkNode('psd','PSD · spectrum','#a855f7',500,86,['s'],['b'],
   `<canvas id="cPsd" width="188" height="86"></canvas><div style="margin-top:4px;color:#7f8aa0;">1–45 Hz, bands shaded</div>
    <div style="margin-top:6px;color:#7f8aa0;display:flex;justify-content:space-between;font-size:11px;"><span>High-pass</span><span><span id="hpVal">1.0</span> Hz</span></div>
    <input id="hpSl" type="range" min="0.1" max="10" step="0.1" value="1" style="width:100%">
-   <div style="color:#5b647a;font-size:9px;margin-top:2px;">removes slow drift below cutoff → feeds Plasma waveforms</div>
+   <div style="color:#5b647a;font-size:9px;margin-top:2px;">removes slow drift and movement below the cutoff, from the waveforms and the bands (above 4 Hz Delta drops out, above 8 Hz Theta too)</div>
    <div style="margin-top:6px;color:#7f8aa0;font-size:11px;">Line-noise notch</div>
-   <select id="mainsSel" style="width:100%;background:#11161f;color:#e8ecf3;border:1px solid #263049;border-radius:6px;padding:4px;"><option value="60">60 Hz (Americas)</option><option value="50">50 Hz (EU/Asia/AU)</option><option value="0">off</option></select>`);
+   <select id="mainsSel" style="width:100%;background:#11161f;color:#e8ecf3;border:1px solid #263049;border-radius:6px;padding:4px;"><option value="50" selected>50 Hz (EU/Asia/AU)</option><option value="60">60 Hz (Americas)</option><option value="0">off</option></select>
+   <div style="color:#5b647a;font-size:9px;margin-top:2px;">mains hum sits at 50 Hz, above the top band (44 Hz), so this cleans the spectrum plot; the visuals barely change</div>`);
 mkNode('power','PowerBands','#f59e0b',740,86,['b'],['f'],
   `<div class="bars" id="bars"></div>
-   <div style="margin-top:8px;color:#7f8aa0;display:flex;justify-content:space-between;font-size:11px;"><span>Sensitivity</span><span id="sensVal">45</span></div>
-   <input id="sensSl" type="range" min="1" max="100" step="1" value="45" style="width:100%">
-   <div style="color:#5b647a;font-size:9px;margin-top:2px;">low = ignore ambient noise · high = react to faint changes</div>
+   <div style="margin-top:8px;color:#7f8aa0;display:flex;justify-content:space-between;font-size:11px;"><span>Sensitivity</span><span id="sensVal">30</span></div>
+   <input id="sensSl" type="range" min="1" max="100" step="1" value="30" style="width:100%">
+   <div style="color:#5b647a;font-size:9px;margin-top:2px;">low = ignore ambient noise · high = react to faint changes · Delta and Gamma (movement, jaw) get half the sensitivity of Alpha, Theta, Beta</div>
    <div style="margin-top:8px;color:#7f8aa0;display:flex;justify-content:space-between;font-size:11px;"><span>Alpha → Bloom open</span><span id="aSensVal">50</span></div>
    <input id="aSensSl" type="range" min="1" max="100" step="1" value="50" style="width:100%">
-   <div style="color:#5b647a;font-size:9px;margin-top:2px;">higher = the Bloom petals open with less alpha</div>
+   <div style="color:#5b647a;font-size:9px;margin-top:2px;">higher = Bloom petals open / Tree bubbles grow with less alpha</div>
    <div style="margin-top:8px;color:#7f8aa0;display:flex;justify-content:space-between;font-size:11px;"><span>Rainbow threshold</span><span id="rThVal">65</span></div>
    <input id="rThSl" type="range" min="20" max="99" step="1" value="65" style="width:100%">
-   <div style="color:#5b647a;font-size:9px;margin-top:2px;">alpha level you must reach to earn the rainbow (higher = harder)</div>
+   <div style="color:#5b647a;font-size:9px;margin-top:2px;">alpha level you must reach to earn the rainbow / to fill the whole Tree crown (higher = harder)</div>
    <div style="margin-top:8px;color:#e8b04a;display:flex;justify-content:space-between;font-size:11px;"><span>Bloom preview (manual)</span><span id="aManVal">0</span></div>
    <input id="aManSl" type="range" min="0" max="100" step="1" value="0" style="width:100%">
-   <div style="color:#5b647a;font-size:9px;margin-top:2px;">drag up to force the Bloom open &amp; reveal the rainbow (0 = live EEG)</div>`);
+   <div style="color:#5b647a;font-size:9px;margin-top:2px;">drag up to force the Bloom open / grow and fill the Tree by hand (0 = live EEG)</div>`);
 mkNode('sig','Signal quality','#38bdf8',260,300,['s'],[],
   `<div id="sigRows" style="font-size:11px;line-height:1.7;">—</div>
-   <div style="margin-top:7px;color:#7f8aa0;font-size:11px;display:flex;justify-content:space-between;align-items:center;"><span>Artefact gate</span><label style="color:#e8ecf3;cursor:pointer;"><input type="checkbox" id="gateChk"> on</label></div>
+   <div style="margin-top:7px;color:#7f8aa0;font-size:11px;display:flex;justify-content:space-between;align-items:center;"><span>Artefact gate</span><label style="color:#e8ecf3;cursor:pointer;"><input type="checkbox" id="gateChk" checked> on</label></div>
    <div style="color:#7f8aa0;font-size:11px;display:flex;justify-content:space-between;margin-top:4px;"><span>Reject above</span><span><span id="gateVal">150</span> µV</span></div>
    <input id="gateSl" type="range" min="40" max="400" step="5" value="150" style="width:100%">
    <div style="color:#5b647a;font-size:9px;margin-top:2px;">blinks / jaw-clench spikes above this are dropped so they can't jump the visuals</div>
@@ -267,7 +268,7 @@ mkNode('feat','Features','#ef4444',740,300,['f'],['o'],
 mkNode('out','▶ Visualiser','#22c55e',980,300,['o'],['o'],
   `<div id="outDom">—</div><div id="stateLabel" style="margin-top:4px;font-size:14px;font-weight:700;color:#e8ecf3;">state: —</div><div style="margin-top:3px;color:#22c55e;font-size:11px;">broadcasting live</div>`);
 mkNode('route','Routing · feature → knob','#22d3ee',980,70,['f'],['o'],
-  `<div style="font-size:10px;color:#7f8aa0;margin-bottom:4px;">pick what drives each knob (or —)</div>
+  `<div style="font-size:10px;color:#7f8aa0;margin-bottom:4px;">pick what drives each knob (or —)<br>Tree: Bloom = size + new bubbles · Speed = jitter · Ripple = float + seeds · Warmth = tint · Glow = trunk glow</div>
    <div class="rr"><span>Bloom</span><select id="rt-size"></select></div>
    <div class="rr"><span>Speed</span><select id="rt-speed"></select></div>
    <div class="rr"><span>Ripple</span><select id="rt-ripple"></select></div>
@@ -301,7 +302,7 @@ for(const [k,nm] of DER){ const tr=document.createElement('tr');
   ftab.appendChild(tr); ftV[k]=tr.querySelector('.v'); ftD[k]=tr.querySelector('.d'); }
 // routing: choose which feature drives each visual knob (or — to disconnect)
 const FEAT_OPTS=[['none','—'],['Delta','Delta'],['Theta','Theta'],['Alpha','Alpha'],['Beta','Beta'],['Gamma','Gamma'],['FAA','Asymmetry'],['TB','Focus'],['HRV','Calm'],['LZ','Richness'],['PC1','PCA-1'],['PC2','PCA-2'],['SE','Entropy']];
-const route={ size:'Alpha', speed:'Beta', ripple:'Theta', warmth:'FAA', glow:'HRV' };
+const route={ size:'Alpha', speed:'Beta', ripple:'Theta', warmth:'FAA', glow:'Delta' };
 for(const knob of ['size','speed','ripple','warmth','glow']){ const sel=document.getElementById('rt-'+knob);
   sel.innerHTML=FEAT_OPTS.map(([v,l])=>`<option value="${v}">${l}</option>`).join(''); sel.value=route[knob];
   sel.addEventListener('change',e=>route[knob]=e.target.value); }
@@ -310,7 +311,7 @@ const cRaw=document.getElementById('cRaw').getContext('2d');
 const cPsd=document.getElementById('cPsd').getContext('2d');
 
 // --- per-electrode signal quality + artefact gate: the per-subject tuning tools ---
-let gateOn=false, gateThresh=150, artefact=false, artStart=0;   // gate OFF by default so it can never be why the visuals look stuck
+let gateOn=true, gateThresh=150, artefact=false, artStart=0;   // gate ON by default for noisy rooms; the 1.5 s release valve stops it freezing the visuals
 function chRms(c){ let m=0; for(let i=0;i<N;i++) m+=buffers[c][i]; m/=N; let s=0; for(let i=0;i<N;i++){ const v=buffers[c][i]-m; s+=v*v; } return Math.sqrt(s/N); }
 function chPeak(c){ let m=0; for(let i=0;i<N;i++) m+=buffers[c][i]; m/=N; let mx=0; for(let i=0;i<N;i++){ const a=Math.abs(buffers[c][i]-m); if(a>mx)mx=a; } return mx; }
 function qualOf(rms){ if(rms<0.6) return ['flat','#ef4444']; if(rms>70) return ['noisy','#ef4444']; if(rms>40) return ['fair','#f59e0b']; return ['good','#22c55e']; }
@@ -355,10 +356,10 @@ function compute(){
   if(r){ if(!artefact){ for(const k in BANDS) bandVals[k]+=(r.rel[k]-bandVals[k])*ctrl.smooth; }
     if(baseReady){                                    // BASELINE-RELATIVE: score each band vs YOUR own rest (one-sided z)
       const span=3.0-(ctrl.sens/100)*2.0;             // so resting stays ~0 (calm) and only real increases light up
-      for(const k in BANDS){ const z=(bandVals[k]-baseMu[k])/baseSd[k]; F[k]=Math.min(1,Math.max(0, z/span)); }
+      for(const k in BANDS){ const z=(bandVals[k]-baseMu[k])/baseSd[k]; const sp=(k==='Delta'||k==='Gamma')?span*2:span; F[k]=Math.min(1,Math.max(0, z/sp)); }   // Delta/Gamma carry movement + jaw in a noisy room: half sensitivity
     } else {                                          // no baseline yet → absolute gain (click Calibrate for the responsive mode)
       const _g=0.6+(ctrl.sens/100)*4.0, _floor=(1-ctrl.sens/100)*0.07;
-      for(const k in BANDS) F[k]=Math.min(1, Math.max(0, bandVals[k]-_floor)*_g);
+      for(const k in BANDS) F[k]=Math.min(1, Math.max(0, bandVals[k]-_floor)*_g*((k==='Delta'||k==='Gamma')?0.5:1));
     }
     F.FAA=norm('FAA',r.FAA); F.TB=norm('TB',r.thetaBeta);
     pcaBuf.push([r.rel.Delta,r.rel.Theta,r.rel.Alpha,r.rel.Beta,r.rel.Gamma]); if(pcaBuf.length>160) pcaBuf.shift(); }
